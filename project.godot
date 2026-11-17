@@ -23,6 +23,8 @@ buses/default_bus_layout="res://default_bus_layout.tres"
 
 ContentDB="*res://godot/scripts/autoload/content_db.gd"
 LocaleService="*res://godot/scripts/autoload/locale_service.gd"
+SSSController="*res://godot/scripts/autoload/sss_controller.gd"
+CampaignManager="*res://godot/scripts/autoload/campaign_manager.gd"
 
 [display]
 
