@@ -136,8 +136,7 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var st := event as InputEventScreenTouch
 		_dragging = st.pressed
-		if st.pressed:
-			_drag_accum = 0.0
+		_drag_accum = 0.0
 	elif event is InputEventScreenDrag:
 		var sd := event as InputEventScreenDrag
 		_drag_accum += sd.relative.length()
@@ -147,8 +146,7 @@ func _gui_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			_dragging = mb.pressed
-			if mb.pressed:
-				_drag_accum = 0.0
+			_drag_accum = 0.0
 	elif event is InputEventMouseMotion and _dragging:
 		var mm := event as InputEventMouseMotion
 		_drag_accum += mm.relative.length()
@@ -203,28 +201,30 @@ func _create_card_node(card: SSSCardData) -> Dictionary:
 	panel.size = Vector2(CARD_W, CARD_H)
 	panel.custom_minimum_size = Vector2(CARD_W, CARD_H)
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var panel_cid: String = card.id
+	panel.gui_input.connect(func(ev: InputEvent) -> void: _on_card_panel_gui_input(panel_cid, ev))
 	_board_surface.add_child(panel)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 4)
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.mouse_filter = Control.MOUSE_FILTER_PASS
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(vbox)
 
 	var top_bar := HBoxContainer.new()
-	top_bar.mouse_filter = Control.MOUSE_FILTER_PASS
+	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(top_bar)
 
 	var title_lbl := Label.new()
 	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_lbl.clip_text = true
-	title_lbl.mouse_filter = Control.MOUSE_FILTER_PASS
+	title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_bar.add_child(title_lbl)
 
 	var badge_lbl := Label.new()
 	badge_lbl.theme_type_variation = &"MutedLabel"
-	badge_lbl.mouse_filter = Control.MOUSE_FILTER_PASS
+	badge_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_bar.add_child(badge_lbl)
 
 	var effect_rtl := RichTextLabel.new()
@@ -233,13 +233,13 @@ func _create_card_node(card: SSSCardData) -> Dictionary:
 	effect_rtl.scroll_active = false
 	effect_rtl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	effect_rtl.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	effect_rtl.mouse_filter = Control.MOUSE_FILTER_PASS
+	effect_rtl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(effect_rtl)
 
 	var rank_row := HBoxContainer.new()
 	rank_row.add_theme_constant_override("separation", 4)
 	rank_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rank_row.mouse_filter = Control.MOUSE_FILTER_PASS
+	rank_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(rank_row)
 
 	var rank_btns: Array[Button] = []
@@ -252,6 +252,7 @@ func _create_card_node(card: SSSCardData) -> Dictionary:
 		rb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		rb.mouse_filter = Control.MOUSE_FILTER_PASS
 		var cid := card.id
+		rb.button_down.connect(func() -> void: _drag_accum = 0.0)
 		rb.pressed.connect(func() -> void: _on_rank_button_pressed(cid, rk_val))
 		rank_row.add_child(rb)
 		rank_btns.append(rb)
@@ -266,10 +267,18 @@ func _create_card_node(card: SSSCardData) -> Dictionary:
 	}
 
 
-func _on_rank_button_pressed(card_id: String, rank_val: int) -> void:
-	if _drag_accum > 10.0:
-		_drag_accum = 0.0
-		return
+func _on_card_panel_gui_input(card_id: String, event: InputEvent) -> void:
+	var is_release := false
+	if event is InputEventScreenTouch:
+		is_release = not (event as InputEventScreenTouch).pressed
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		is_release = (mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed)
+	if is_release and _drag_accum <= 10.0:
+		_on_card_tapped(card_id)
+
+
+func _on_card_tapped(card_id: String) -> void:
 	highlighted_card_id = card_id
 	card_focused.emit(card_id)
 	var sss := _get_autoload("SSSController")
@@ -277,8 +286,17 @@ func _on_rank_button_pressed(card_id: String, rank_val: int) -> void:
 		var audio := _get_autoload("AudioController")
 		if audio != null and audio.has_method("play_sfx"):
 			audio.call("play_sfx", "blocked")
-		if _edge_layer != null:
-			_edge_layer.queue_redraw()
+	if _edge_layer != null:
+		_edge_layer.queue_redraw()
+
+
+func _on_rank_button_pressed(card_id: String, rank_val: int) -> void:
+	if _drag_accum > 10.0:
+		_drag_accum = 0.0
+		return
+	_on_card_tapped(card_id)
+	var sss := _get_autoload("SSSController")
+	if sss != null and sss.has_method("is_card_unlocked") and not bool(sss.call("is_card_unlocked", card_id)):
 		return
 	card_rank_requested.emit(card_id, rank_val)
 
@@ -361,6 +379,7 @@ func refresh_from_controller() -> void:
 			if idx == 0:
 				rb.text = off_label
 			rb.disabled = not unlocked
+			rb.mouse_filter = Control.MOUSE_FILTER_IGNORE if not unlocked else Control.MOUSE_FILTER_PASS
 			var is_sel: bool = unlocked and lv == RANK_VALUES[idx]
 			rb.theme_type_variation = &"AccentButton" if is_sel else &""
 

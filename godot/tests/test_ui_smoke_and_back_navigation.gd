@@ -413,9 +413,79 @@ func _test_difficulty_screen_and_dual_mode_sss_board() -> void:
 	assert_eq(int(SSSController.levels.get("passive", -1)), 0, "dependent card passive cascaded to 0")
 	assert_eq(int(SaveAndSettingsService.settings.sss_levels.get("pc", -1)), 0, "sss_levels synced to SaveAndSettingsService")
 
-	# Verify fixed Hide Forecast checkbox in SSS board!
+	# Round 1 (2a): Tapping a locked card in SSSGraphCanvas highlights required prerequisite path
+	assert_false(SSSController.is_card_unlocked("passive"), "passive is locked while pc == 0")
+	graph.highlighted_card_id = ""
+	var passive_panel := graph.find_child("GraphCard_passive", true, false) as PanelContainer
+	assert_true(passive_panel != null, "GraphCard_passive panel exists in SSSGraphCanvas")
+	if passive_panel != null:
+		var passive_btns := passive_panel.find_children("*", "Button", true, false)
+		for p_rb in passive_btns:
+			assert_eq((p_rb as Button).mouse_filter, Control.MOUSE_FILTER_IGNORE, "disabled rank button passes taps through to locked card panel")
+		# Dragging across a locked card must pan, not trigger locked-card tap
+		var drag_press := InputEventMouseButton.new()
+		drag_press.button_index = MOUSE_BUTTON_LEFT
+		drag_press.pressed = true
+		passive_panel.gui_input.emit(drag_press)
+		graph._gui_input(drag_press)
+		var drag_motion := InputEventMouseMotion.new()
+		drag_motion.relative = Vector2(-60.0, 0.0)
+		graph._gui_input(drag_motion)
+		var drag_release := InputEventMouseButton.new()
+		drag_release.button_index = MOUSE_BUTTON_LEFT
+		drag_release.pressed = false
+		passive_panel.gui_input.emit(drag_release)
+		graph._gui_input(drag_release)
+		assert_eq(graph.highlighted_card_id, "", "dragging over locked card does not falsely trigger tap")
+
+		# Clean tap on locked card sets highlighted_card_id
+		var tap_press := InputEventMouseButton.new()
+		tap_press.button_index = MOUSE_BUTTON_LEFT
+		tap_press.pressed = true
+		passive_panel.gui_input.emit(tap_press)
+		graph._gui_input(tap_press)
+		var tap_release := InputEventMouseButton.new()
+		tap_release.button_index = MOUSE_BUTTON_LEFT
+		tap_release.pressed = false
+		passive_panel.gui_input.emit(tap_release)
+		graph._gui_input(tap_release)
+	assert_eq(graph.highlighted_card_id, "passive", "tapping locked GraphCard_passive sets highlighted_card_id")
+
+	# Round 1 (2b): Mouse panning on SSSGraphCanvas must not swallow the next unlocked rank button click
+	var pan_down := InputEventMouseButton.new()
+	pan_down.button_index = MOUSE_BUTTON_LEFT
+	pan_down.pressed = true
+	graph._gui_input(pan_down)
+	var pan_move := InputEventMouseMotion.new()
+	pan_move.relative = Vector2(-140.0, -45.0)
+	graph._gui_input(pan_move)
+	var pan_up := InputEventMouseButton.new()
+	pan_up.button_index = MOUSE_BUTTON_LEFT
+	pan_up.pressed = false
+	graph._gui_input(pan_up)
+
+	var pc_panel := graph.find_child("GraphCard_pc", true, false) as PanelContainer
+	assert_true(pc_panel != null, "GraphCard_pc panel exists in SSSGraphCanvas")
+	if pc_panel != null:
+		var pc_rank_btns := pc_panel.find_children("*", "Button", true, false)
+		assert_eq(pc_rank_btns.size(), 4, "GraphCard_pc has 4 rank buttons")
+		if pc_rank_btns.size() == 4:
+			(pc_rank_btns[3] as Button).pressed.emit()
+	assert_eq(int(SSSController.levels.get("pc", -1)), 20, "first unlocked rank button click after mouse pan applies rank 20 immediately")
+
+	# Round 1 (3): Both forecast CheckBoxes wrap text cleanly without mid-word clipping on 412px portrait
+	var std_cb := diff_screen.get("chk_standard_forecast") as CheckBox
 	var hide_cb := diff_screen.get("chk_sss_hide_forecast") as CheckBox
+	assert_true(std_cb != null, "Standard Forecast CheckBox exists")
 	assert_true(hide_cb != null, "SSS Hide Forecast CheckBox exists")
+	if std_cb != null:
+		assert_eq(std_cb.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "chk_standard_forecast uses AUTOWRAP_WORD_SMART")
+		assert_false(std_cb.clip_text, "chk_standard_forecast does not clip_text")
+	if hide_cb != null:
+		assert_eq(hide_cb.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "chk_sss_hide_forecast uses AUTOWRAP_WORD_SMART")
+		assert_false(hide_cb.clip_text, "chk_sss_hide_forecast does not clip_text")
+
+	# Verify fixed Hide Forecast checkbox in SSS board!
 	assert_true(hide_cb.button_pressed, "SSS Hide Forecast defaults to true")
 
 	diff_screen.call("set_sss_hide_forecast", false)
@@ -435,6 +505,25 @@ func _test_difficulty_screen_and_dual_mode_sss_board() -> void:
 	assert_eq(bool(diff_screen.get("sss_board_open")), true, "SSS board still open before Back")
 	shell.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
 	assert_eq(bool(diff_screen.get("sss_board_open")), false, "Back closes SSS board back to standard difficulty view")
+
+	# Round 1 (1): Confirming SSS and toggling chk_standard_forecast on standard view syncs SSSController.hide_forecast & CampaignManager.show_option_effects
+	assert_eq(String(diff_screen.get("selected_difficulty")), "ucn", "selected_difficulty remains ucn after confirming/closing SSS board")
+	assert_false(std_cb.disabled, "chk_standard_forecast enabled when ucn is selected")
+	assert_eq(std_cb.button_pressed, false, "chk_standard_forecast reflects not SSSController.hide_forecast (false when hide_forecast == true)")
+
+	std_cb.button_pressed = true
+	assert_eq(SSSController.hide_forecast, false, "checking chk_standard_forecast while ucn selected sets SSSController.hide_forecast = false")
+	assert_eq(SaveAndSettingsService.settings.sss_hide_forecast, false, "checking chk_standard_forecast persists sss_hide_forecast = false")
+	assert_eq(hide_cb.button_pressed, false, "chk_sss_hide_forecast synced to false")
+	diff_screen.call("start_selected_campaign")
+	assert_eq(CampaignManager.selected_difficulty, "ucn", "start_selected_campaign launches ucn")
+	assert_eq(CampaignManager.show_option_effects, true, "start_selected_campaign honors chk_standard_forecast == true for ucn")
+
+	std_cb.button_pressed = false
+	assert_eq(SSSController.hide_forecast, true, "unchecking chk_standard_forecast while ucn selected sets SSSController.hide_forecast = true")
+	assert_eq(SaveAndSettingsService.settings.sss_hide_forecast, true, "unchecking chk_standard_forecast persists sss_hide_forecast = true")
+	diff_screen.call("start_selected_campaign")
+	assert_eq(CampaignManager.show_option_effects, false, "start_selected_campaign honors chk_standard_forecast == false for ucn")
 
 	diff_screen.queue_free()
 	await tree.process_frame

@@ -204,7 +204,7 @@ func _build_standard_difficulty_view() -> void:
 	chk_standard_forecast.name = "ChkStandardForecast"
 	chk_standard_forecast.custom_minimum_size = Vector2(0.0, 48.0)
 	chk_standard_forecast.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chk_standard_forecast.clip_text = true
+	chk_standard_forecast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	chk_standard_forecast.toggled.connect(func(on: bool) -> void: set_standard_forecast_enabled(on))
 	lower_controls.add_child(chk_standard_forecast)
 
@@ -368,7 +368,7 @@ func _build_sss_board_view() -> void:
 	chk_sss_hide_forecast.custom_minimum_size = Vector2(0.0, 48.0)
 	chk_sss_hide_forecast.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	chk_sss_hide_forecast.button_pressed = true
-	chk_sss_hide_forecast.clip_text = true
+	chk_sss_hide_forecast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	chk_sss_hide_forecast.toggled.connect(func(on: bool) -> void: set_sss_hide_forecast(on))
 	bottom_dock.add_child(chk_sss_hide_forecast)
 
@@ -505,6 +505,9 @@ func select_difficulty(diff_id: String) -> void:
 
 
 func set_standard_forecast_enabled(enabled: bool) -> void:
+	if selected_difficulty == "ucn":
+		set_sss_hide_forecast(not enabled)
+		return
 	standard_forecast_enabled = enabled
 	var save_svc := get_node_or_null("/root/SaveAndSettingsService")
 	if save_svc != null:
@@ -575,6 +578,7 @@ func set_sss_hide_forecast(hide: bool) -> void:
 	if chk_sss_hide_forecast != null:
 		chk_sss_hide_forecast.set_pressed_no_signal(hide)
 	_persist_sss_settings()
+	refresh_ui()
 
 
 func _persist_sss_settings() -> void:
@@ -674,7 +678,13 @@ func launch_sss_campaign() -> void:
 
 func _launch_campaign_internal(diff_id: String) -> void:
 	var cm := get_node_or_null("/root/CampaignManager")
-	var fc := false if diff_id == "historical" else standard_forecast_enabled
+	var sss_node := get_node_or_null("/root/SSSController")
+	var fc := standard_forecast_enabled
+	if diff_id == "historical":
+		fc = false
+	elif diff_id == "ucn":
+		var hide_fc := bool(sss_node.get("hide_forecast")) if (sss_node != null and "hide_forecast" in sss_node) else true
+		fc = not hide_fc
 	if cm != null and cm.has_method("start_new_campaign"):
 		cm.call("start_new_campaign", diff_id, fc)
 	if shell != null and shell.bottom_sheet_host != null:
@@ -737,7 +747,14 @@ func refresh_ui() -> void:
 	if chk_standard_forecast != null:
 		var is_hist := (selected_difficulty == "historical")
 		chk_standard_forecast.disabled = is_hist
-		chk_standard_forecast.set_pressed_no_signal(false if is_hist else standard_forecast_enabled)
+		if is_hist:
+			chk_standard_forecast.set_pressed_no_signal(false)
+		elif selected_difficulty == "ucn":
+			var sss_node := get_node_or_null("/root/SSSController")
+			var hide_fc := bool(sss_node.get("hide_forecast")) if (sss_node != null and "hide_forecast" in sss_node) else true
+			chk_standard_forecast.set_pressed_no_signal(not hide_fc)
+		else:
+			chk_standard_forecast.set_pressed_no_signal(standard_forecast_enabled)
 		chk_standard_forecast.text = _tr("difficulty.forecast_toggle")
 
 	if btn_back_to_title != null:
