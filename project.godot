@@ -19,6 +19,11 @@ run/low_processor_usage_mode=true
 
 buses/default_bus_layout="res://default_bus_layout.tres"
 
+[autoload]
+
+ContentDB="*res://godot/scripts/autoload/content_db.gd"
+LocaleService="*res://godot/scripts/autoload/locale_service.gd"
+
 [display]
 
 window/size/viewport_width=412
