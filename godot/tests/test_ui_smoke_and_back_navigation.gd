@@ -19,6 +19,7 @@ func run() -> int:
 	await _test_title_screen_thumb_zone_sheets_changelog_and_toggles()
 	await _test_difficulty_screen_and_dual_mode_sss_board()
 	await _test_campaign_shell_and_five_tabs_flow()
+	await _test_turn_23_mpr_election_dossier_png_and_epilogue()
 
 	await tree.process_frame
 	await tree.process_frame
@@ -908,4 +909,117 @@ func _test_campaign_shell_and_five_tabs_flow() -> void:
 
 	camp.queue_free()
 	await tree.process_frame
+
+
+func _test_turn_23_mpr_election_dossier_png_and_epilogue() -> void:
+	LocaleService.set_locale("id")
+	ThemeManager.apply_theme("midnight_slate", 1.0)
+	AchievementService.restore_state({})
+	assert_false(AchievementService.is_unlocked("complete_run"), "complete_run locked before MPR roll call")
+
+	var dossier_path := "user://test_dossier.png"
+	if FileAccess.file_exists(dossier_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(dossier_path))
+
+	CampaignManager.rng.seed = 19991020
+	OppositionManager.rng.seed = 19991020
+	CampaignManager.start_new_campaign("easy", true)
+	CampaignManager.current_turn = 23
+	CampaignManager.is_action_phase = false
+	CampaignManager.event_resolved_this_turn = false
+
+	var camp_packed := ResourceLoader.load("res://godot/scenes/campaign_shell_screen.tscn") as PackedScene
+	assert_true(camp_packed != null, "campaign_shell_screen.tscn available for Turn 23 transition")
+	var camp := camp_packed.instantiate()
+	camp.set("allow_scene_change", false)
+	tree.root.add_child(camp)
+	await tree.process_frame
+	await tree.process_frame
+
+	var ev23 := ContentDB.get_event_by_turn(23)
+	assert_true(ev23 != null and ev23.id == "ev_timtim_merdeka", "Turn 23 event is ev_timtim_merdeka")
+
+	var agenda_tab := camp.call("get_tab_view", 0) as Control
+	var res23: Dictionary = agenda_tab.call("select_crisis_option", 0)
+	assert_true(bool(res23.get("ok", false)), "Turn 23 ev_timtim_merdeka option 0 resolved")
+	assert_true(CampaignManager.is_election_ready(), "CampaignManager is_election_ready() after Turn 23")
+	await tree.process_frame
+	await tree.process_frame
+
+	var elec_packed := ResourceLoader.load("res://godot/scenes/election_and_epilogue_screen.tscn") as PackedScene
+	assert_true(elec_packed != null, "election_and_epilogue_screen.tscn loads as PackedScene")
+
+	var elec_screen := camp.get("active_election_screen") as Control
+	var has_elec_script := elec_screen != null and elec_screen.has_method("get_tally_control_buttons")
+	assert_true(has_elec_script, "Resolving Turn 23 ev_timtim_merdeka opens scripted ElectionAndEpilogueScreen")
+	if not has_elec_script:
+		camp.queue_free()
+		await tree.process_frame
+		return
+
+	var half_y := float(ProjectSettings.get_setting("display/window/size/viewport_height")) * 0.5
+	var speed_btns: Array = elec_screen.call("get_tally_control_buttons")
+	assert_eq(speed_btns.size(), 5, "ElectionAndEpilogueScreen exposes 1x, 2x, 5x, 10x, and Skip buttons")
+	for raw_sb in speed_btns:
+		var sb := raw_sb as Button
+		if sb != null:
+			assert_true(sb.size.y >= 48.0 or sb.get_combined_minimum_size().y >= 48.0, "Tally button '%s' height >= 48px" % sb.name)
+			assert_true(sb.global_position.y >= half_y, "Tally button '%s' sits in lower thumb zone" % sb.name)
+
+	elec_screen.call("set_tally_speed", 5)
+	assert_eq(int(elec_screen.call("get_tally_speed")), 5, "set_tally_speed updates tally speed to 5x")
+
+	# Press Skip / skip_roll_call -> completes 700-seat tally, reveals TAP MPR No. III/MPR/1999, unlocks complete_run
+	elec_screen.call("skip_roll_call")
+	await tree.process_frame
+	assert_true(bool(elec_screen.call("is_roll_call_finished")), "skip_roll_call finishes the MPR plenary tally")
+	assert_eq(int(elec_screen.call("get_tallied_seat_count")), 700, "All 700 MPR seats tallied")
+	assert_true(AchievementService.is_unlocked("complete_run"), "Finishing MPR roll call unlocks complete_run achievement")
+
+	var tap_text := String(elec_screen.call("get_tap_mpr_document_text"))
+	assert_true(tap_text.contains("III/MPR/1999"), "Official TAP MPR No. III/MPR/1999 document rendered")
+	assert_true(tap_text.contains("Amien Rais"), "TAP MPR includes MPR Chairman signature")
+
+	# Switch to State of the Republic dossier & export 1080px PNG
+	elec_screen.call("show_dossier_view")
+	await tree.process_frame
+	var export_err: int = await elec_screen.call("export_dossier_png", dossier_path)
+	assert_eq(export_err, OK, "export_dossier_png returns OK")
+	assert_true(FileAccess.file_exists(dossier_path), "user://test_dossier.png created on disk")
+	if FileAccess.file_exists(dossier_path):
+		var raw_bytes := FileAccess.get_file_as_bytes(dossier_path)
+		assert_true(raw_bytes.size() > 10240, "Exported State of the Republic PNG > 10 KB (got %d bytes)" % raw_bytes.size())
+		var loaded_img := Image.load_from_file(ProjectSettings.globalize_path(dossier_path))
+		assert_true(loaded_img != null, "Exported PNG loads cleanly as Image")
+		if loaded_img != null:
+			assert_eq(loaded_img.get_width(), 1080, "Exported State of the Republic PNG width == 1080px")
+			assert_true(loaded_img.get_height() >= 1000, "Exported State of the Republic PNG height >= 1000px")
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(dossier_path))
+
+	# Verify 351 quorum-failure banner when total_for > total_against but < 351 (e.g. 345 vs 325 with 30 vacated seats)
+	elec_screen.call("apply_election_summary", {
+		"accepted": false,
+		"quorum_failed": true,
+		"total_for": 345,
+		"total_against": 325,
+		"total_blank": 0,
+		"chamber_seats": 670,
+		"original_chamber_seats": 700,
+		"factions": [],
+	})
+	await tree.process_frame
+	var verdict_banner := String(elec_screen.call("get_verdict_banner_text"))
+	assert_true(verdict_banner.contains("DITOLAK"), "345 vs 325 (< 351 quorum) displays DITOLAK")
+	assert_true(verdict_banner.contains("351") or verdict_banner.to_lower().contains("kuorum"), "Quorum failure message displayed when votes_for < 351")
+
+	# Open Epilogue screen and verify historical narrative
+	elec_screen.call("open_epilogue_view")
+	await tree.process_frame
+	assert_true(bool(elec_screen.call("is_epilogue_open")), "open_epilogue_view opens the Epilogue view")
+	var epi_text := String(elec_screen.call("get_epilogue_text"))
+	assert_true(epi_text.contains("1999") and epi_text.length() > 300, "Epilogue renders full historical narrative")
+
+	camp.queue_free()
+	await tree.process_frame
+
 

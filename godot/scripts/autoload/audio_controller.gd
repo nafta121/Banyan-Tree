@@ -417,11 +417,12 @@ func _load_audio_stream_safe(path: String, is_music: bool) -> AudioStream:
 	if clean_path.is_empty():
 		return null
 
+	var has_raw_file := FileAccess.file_exists(clean_path)
 	var has_imported := (
 		FileAccess.file_exists(clean_path + ".import")
 		or FileAccess.file_exists(clean_path + ".remap")
+		or (not has_raw_file and ResourceLoader.exists(clean_path))
 	)
-	var has_raw_file := FileAccess.file_exists(clean_path)
 
 	if not has_imported and not has_raw_file:
 		return null

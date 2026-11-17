@@ -1,6 +1,9 @@
 class_name AgendaTabView
 extends VBoxContainer
 
+signal election_screen_requested(scene_path: String)
+
+const ELECTION_SCENE_PATH := "res://godot/scenes/election_and_epilogue_screen.tscn"
 const ACTION_CATEGORIES: Array[String] = [
 	"all",
 	"Politics",
@@ -239,6 +242,8 @@ func select_crisis_option(option_idx: int) -> Dictionary:
 		AudioController.play_sfx("click")
 	var out := CampaignManager.choose_event_option(option_idx)
 	refresh_view()
+	if bool(out.get("election_ready", false)) or CampaignManager.is_election_ready():
+		election_screen_requested.emit(ELECTION_SCENE_PATH)
 	return out
 
 

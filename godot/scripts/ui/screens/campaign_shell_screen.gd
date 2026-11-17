@@ -26,6 +26,7 @@ var more_tab: MoreDrawerTabView = null
 
 var active_tab_index: int = 0
 var last_press_sheet: EditorialPressSheet = null
+var active_election_screen: Control = null
 
 
 func _init() -> void:
@@ -78,6 +79,7 @@ func _init() -> void:
 
 	agenda_tab = AgendaTabView.new()
 	agenda_tab.bind_sheet_host(shell.bottom_sheet_host)
+	agenda_tab.election_screen_requested.connect(open_election_screen)
 	_tabs_host.add_child(agenda_tab)
 
 	stat_tab = StatDashboardTabView.new()
@@ -187,7 +189,28 @@ func _on_negotiate_faction_from_mpr(faction_id: String) -> void:
 		agenda_tab.select_faction(faction_id)
 
 
+func open_election_screen(scene_path: String = "res://godot/scenes/election_and_epilogue_screen.tscn") -> void:
+	if shell != null and shell.bottom_sheet_host != null:
+		shell.bottom_sheet_host.clear_all_sheets()
+	if allow_scene_change and is_inside_tree() and get_tree() != null and get_tree().current_scene != null and ResourceLoader.exists(scene_path):
+		get_tree().change_scene_to_file(scene_path)
+		return
+	if active_election_screen != null and is_instance_valid(active_election_screen):
+		return
+	if ResourceLoader.exists(scene_path):
+		var packed := ResourceLoader.load(scene_path) as PackedScene
+		if packed != null:
+			var inst := packed.instantiate() as Control
+			if inst != null:
+				inst.set("allow_scene_change", allow_scene_change)
+				active_election_screen = inst
+				add_child(inst)
+
+
 func _on_press_alert_queued(payload: Dictionary) -> void:
+	# Turn 23 (ev_timtim_merdeka) transitions straight into ElectionAndEpilogueScreen
+	if CampaignManager != null and CampaignManager.is_election_ready():
+		return
 	if shell == null or shell.bottom_sheet_host == null:
 		return
 	var exact := SaveAndSettingsService != null and SaveAndSettingsService.settings != null and SaveAndSettingsService.settings.show_exact_numbers
