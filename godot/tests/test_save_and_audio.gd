@@ -247,10 +247,15 @@ func _test_settings_hydration_and_backup_json_roundtrip() -> void:
 	s.difficulty_wins = AchievementService.difficulty_wins.duplicate()
 	SaveAndSettingsService.save_settings()
 
-	# Mount a temporary mock ThemeManager to verify Task 6 ThemeManager seam hydration
-	var mock_tm := _MockThemeManager.new()
-	mock_tm.name = "ThemeManager"
-	tree.root.add_child(mock_tm)
+	# Verify Task 6 ThemeManager hydration (use real Autoload if mounted, else fallback mock)
+	var existing_tm := tree.root.get_node_or_null("ThemeManager")
+	var mock_tm: _MockThemeManager = null
+	if existing_tm != null:
+		existing_tm.call("apply_theme", "midnight_slate", 1.0)
+	else:
+		mock_tm = _MockThemeManager.new()
+		mock_tm.name = "ThemeManager"
+		tree.root.add_child(mock_tm)
 
 	# Scramble live state across LocaleService, SSSController, AchievementService, and AudioController
 	LocaleService.set_locale("id")
@@ -263,16 +268,21 @@ func _test_settings_hydration_and_backup_json_roundtrip() -> void:
 	SaveAndSettingsService.load_settings()
 
 	assert_eq(LocaleService.current_locale, "en", "load_settings hydrated LocaleService to en")
-	assert_eq(mock_tm.applied_theme_id, "editorial_paper", "load_settings hydrated ThemeManager theme_id")
-	assert_near(mock_tm.applied_text_scale, 1.25, 0.001, "load_settings hydrated ThemeManager text_scale")
+	if existing_tm != null:
+		assert_eq(String(existing_tm.get("active_theme_id")), "editorial_paper", "load_settings hydrated ThemeManager theme_id")
+		assert_near(float(existing_tm.get("active_text_scale")), 1.25, 0.001, "load_settings hydrated ThemeManager text_scale")
+	else:
+		assert_eq(mock_tm.applied_theme_id, "editorial_paper", "load_settings hydrated ThemeManager theme_id")
+		assert_near(mock_tm.applied_text_scale, 1.25, 0.001, "load_settings hydrated ThemeManager text_scale")
 	assert_eq(int(SSSController.levels.get("pc", 0)), 20, "load_settings hydrated SSSController pc rank 20")
 	assert_eq(int(SSSController.levels.get("s_econ", 0)), 5, "load_settings hydrated SSSController s_econ rank 5")
 	assert_eq(SSSController.hide_forecast, false, "load_settings hydrated SSSController hide_forecast == false")
 	assert_true(AchievementService.is_unlocked("win_historical"), "load_settings hydrated AchievementService win_historical")
 	assert_true(AchievementService.difficulty_wins.has("historical"), "load_settings hydrated difficulty_wins")
 
-	tree.root.remove_child(mock_tm)
-	mock_tm.free()
+	if mock_tm != null:
+		tree.root.remove_child(mock_tm)
+		mock_tm.free()
 
 	# Export full backup JSON (settings + achievements + all existing save slots)
 	var backup_path := "user://test_backup.json"
@@ -533,6 +543,9 @@ func _clean_user_test_artifacts() -> void:
 		AchievementService.restore_state({})
 	if CampaignManager != null:
 		CampaignManager.game_started = false
+	var tm := tree.root.get_node_or_null("ThemeManager") if (tree != null and tree.root != null) else null
+	if tm != null and tm.has_method("apply_theme"):
+		tm.call("apply_theme", "midnight_slate", 1.0)
 
 
 class _MockThemeManager:
