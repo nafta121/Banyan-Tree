@@ -8,7 +8,7 @@ const DEFAULT_LEVEL := 10
 const GRID_COLS := 6
 const GRID_ROWS := 4
 const UNLOCK_ACH_ID := "win_historical"
-const MAXED_ACH_ID := "sss_20"
+const MAXED_ACH_ID := "ucn_6am"
 
 var levels: Dictionary = {}
 var hide_forecast: bool = true
@@ -285,7 +285,7 @@ func restore_run(saved: Dictionary) -> DifficultyData:
 	active_run_levels.clear()
 	if ContentDB != null and ContentDB.catalog != null:
 		for card in ContentDB.catalog.sss_cards:
-			var raw_v := int(saved_lvls.get(card.id, DEFAULT_LEVEL)) if saved_lvls is Dictionary else DEFAULT_LEVEL
+			var raw_v := _js_round(float(saved_lvls.get(card.id, DEFAULT_LEVEL))) if saved_lvls is Dictionary else DEFAULT_LEVEL
 			active_run_levels[card.id] = snap_rank(raw_v)
 		enforce_prereqs(active_run_levels)
 	active_run_hide_forecast = bool(saved.get("hideForecast", true))

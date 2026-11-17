@@ -10,6 +10,7 @@ func run() -> int:
 	_test_events_routines_decrees_factions_and_horse_trading()
 	_test_serialize_and_restore_roundtrip()
 	_test_floor_ramping_turn_23_ucn_restore_and_task4_seams()
+	_test_json_backup_roundtrip_and_review_fixes()
 	return assertions_failed
 
 
@@ -442,10 +443,91 @@ func _test_floor_ramping_turn_23_ucn_restore_and_task4_seams() -> void:
 		# (1 - 0.50) * (1 - 0.40) * (1 - 0.20) = 0.24 -> clamped to 0.40 floor
 		assert_near(CampaignManager.gain_factor("PC"), 0.40, 0.001, "combined gain_factor floor clamped at 0.40")
 
+		# 1-arg OppositionManager hooks: snapshot_seats(), record_seat_transfer(before), on_decree_enacted(decree)
+		CampaignManager.choose_event_option(0)
+		CampaignManager.stats["ref"] = 20
+		CampaignManager.stats["mil"] = 85
+		CampaignManager.factions["abri"]["affinity"] = 85.0
+		CampaignManager.pc = 100
+		var purge_res := CampaignManager.enact_decree("purge_utusan_golongan")
+		assert_true(bool(purge_res.get("ok", false)), "purge_utusan_golongan enacted with mock OppositionManager")
+		assert_eq(mock_opp.recorded_seat_transfers.size(), 1, "record_seat_transfer(before) called with 1 arg")
+		assert_eq(int(mock_opp.recorded_seat_transfers[0].get("utusan_golongan", -1)), 65, "record_seat_transfer received pre-decree seat snapshot")
+		assert_eq(mock_opp.enacted_decrees.size(), 1, "on_decree_enacted(decree) called with 1 arg")
+		assert_eq(mock_opp.enacted_decrees[0].id, "purge_utusan_golongan", "on_decree_enacted received DecreeData resource")
+
 		tree.root.remove_child(mock_opp)
 		mock_opp.free()
 		tree.root.remove_child(mock_ach)
 		mock_ach.free()
+
+	SSSController.apply_preset(10)
+	SSSController.hide_forecast = true
+
+
+func _test_json_backup_roundtrip_and_review_fixes() -> void:
+	# 1. Verify SSSController.MAXED_ACH_ID matches upstream 'ucn_6am' and exists in ContentDB
+	assert_eq(SSSController.MAXED_ACH_ID, "ucn_6am", "SSSController.MAXED_ACH_ID == ucn_6am")
+	assert_true(ContentDB.get_achievement(SSSController.MAXED_ACH_ID) != null, "ucn_6am achievement exists in ContentDB")
+
+	# 2. Full JSON.parse_string(JSON.stringify(serialize_state())) round-trip into restore_state()
+	SSSController.apply_preset(10)
+	SSSController.set_card_rank("pc", 5)
+	SSSController.hide_forecast = false
+	CampaignManager.start_new_campaign("ucn", false)
+
+	var t1_indices := CampaignManager.get_shuffled_option_indices(1)
+	var t2_indices := CampaignManager.get_shuffled_option_indices(2)
+	assert_true(t1_indices.size() >= 3, "Turn 1 shuffled option indices generated")
+	assert_true(t2_indices.size() >= 3, "Turn 2 shuffled option indices generated")
+
+	CampaignManager.choose_event_option(0)
+	CampaignManager.pc = 100
+	CampaignManager.stats["ref"] = 30
+	assert_true(bool(CampaignManager.execute_routine("leak").get("ok", false)), "routine leak executed before JSON backup")
+	CampaignManager.turn_executive_used = false
+	CampaignManager.pc = 100
+	assert_true(bool(CampaignManager.enact_decree("civil_service_neutrality").get("ok", false)), "civil_service_neutrality enacted before JSON backup")
+	CampaignManager.pc = 100
+	assert_true(bool(CampaignManager.engage_faction("golkar_habibie", "loyalist_icmi").get("ok", false)), "loyalist_icmi engaged before JSON backup")
+	CampaignManager.apply_effects({"golkar_habibie_favor": 1})
+
+	var raw_json := JSON.stringify(CampaignManager.serialize_state())
+	var parsed: Variant = JSON.parse_string(raw_json)
+	assert_true(parsed is Dictionary, "JSON.parse_string returned Dictionary")
+
+	# Confirm JSON turned keys to Strings and numbers to floats in parsed payload
+	assert_true((parsed as Dictionary)["shuffled_event_options"].has("1"), "JSON serialized shuffled_event_options key as String '1'")
+	assert_eq(typeof((parsed as Dictionary)["factions"]["pdip"]["seats"]), TYPE_FLOAT, "JSON parsed seats as TYPE_FLOAT")
+
+	# Mutate live state completely before restoring from JSON Dictionary
+	CampaignManager.start_new_campaign("easy", true)
+	CampaignManager.shuffled_event_options.clear()
+
+	CampaignManager.restore_state(parsed as Dictionary)
+
+	# Verify shuffled_event_options normalized back to int keys and Array[int] values (never re-shuffled!)
+	assert_true(CampaignManager.shuffled_event_options.has(1), "shuffled_event_options restored int key 1")
+	assert_false(CampaignManager.shuffled_event_options.has("1"), "shuffled_event_options has no leftover String key '1'")
+	assert_eq(CampaignManager.get_shuffled_option_indices(1), t1_indices, "Turn 1 shuffled option order preserved across JSON round-trip")
+	assert_eq(CampaignManager.get_shuffled_option_indices(2), t2_indices, "Turn 2 shuffled option order preserved across JSON round-trip")
+	assert_eq(typeof(CampaignManager.shuffled_event_options[1][0]), TYPE_INT, "shuffled_event_options element coerced to TYPE_INT")
+
+	# Verify integer fields coerced back to TYPE_INT across factions, min_stats, cooldowns, usage, watermarks, logs
+	assert_eq(typeof(CampaignManager.factions["pdip"]["seats"]), TYPE_INT, "factions.pdip.seats coerced to TYPE_INT")
+	assert_eq(int(CampaignManager.factions["pdip"]["seats"]), 153, "factions.pdip.seats == 153")
+	assert_eq(typeof(CampaignManager.factions["golkar_habibie"]["favor"]), TYPE_INT, "factions.golkar_habibie.favor coerced to TYPE_INT")
+	assert_eq(int(CampaignManager.factions["golkar_habibie"]["favor"]), 1, "factions.golkar_habibie.favor == 1")
+	assert_eq(typeof(CampaignManager.min_stats["ref"]), TYPE_INT, "min_stats.ref coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.action_cooldowns["leak"]), TYPE_INT, "action_cooldowns.leak coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.action_usage_count["leak"]), TYPE_INT, "action_usage_count.leak coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.faction_cooldowns["golkar_habibie:loyalist_icmi"]), TYPE_INT, "faction_cooldowns coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.faction_usage_count["golkar_habibie:loyalist_icmi"]), TYPE_INT, "faction_usage_count coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.turn_faction_used["golkar_habibie"]), TYPE_INT, "turn_faction_used coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.min_stat_watermarks["pop"]), TYPE_INT, "min_stat_watermarks.pop coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.max_stat_watermarks["pop"]), TYPE_INT, "max_stat_watermarks.pop coerced to TYPE_INT")
+	assert_eq(typeof(CampaignManager.gazette_history[0]["turn"]), TYPE_INT, "gazette_history[0].turn coerced to TYPE_INT")
+	assert_eq(int(SSSController.active_run_levels.get("pc", -1)), 5, "UCN frozen SSS rank preserved across JSON round-trip")
 
 	SSSController.apply_preset(10)
 	SSSController.hide_forecast = true
@@ -461,6 +543,8 @@ class _MockAchievementService:
 
 class _MockOppositionManager:
 	extends Node
+	var recorded_seat_transfers: Array[Dictionary] = []
+	var enacted_decrees: Array[DecreeData] = []
 
 	func get_military_resistance() -> float:
 		return 0.50
@@ -473,4 +557,17 @@ class _MockOppositionManager:
 
 	func get_pdip_gain_mult() -> float:
 		return 0.60
+
+	func snapshot_seats() -> Dictionary:
+		var snap: Dictionary = {}
+		for fk in CampaignManager.factions.keys():
+			snap[fk] = int(CampaignManager.factions[fk]["seats"])
+		return snap
+
+	func record_seat_transfer(before: Dictionary) -> void:
+		recorded_seat_transfers.append(before.duplicate(true))
+
+	func on_decree_enacted(decree: DecreeData) -> void:
+		enacted_decrees.append(decree)
+
 

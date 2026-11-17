@@ -693,9 +693,12 @@ func _emit_press_or_telex_alert(
 
 func get_shuffled_option_indices(turn_num: int = -1) -> Array[int]:
 	var t := current_turn if turn_num < 0 else turn_num
-	if shuffled_event_options.has(t):
+	if shuffled_event_options.has(t) or shuffled_event_options.has(str(t)):
+		var raw_cached: Variant = shuffled_event_options.get(t, shuffled_event_options.get(str(t), []))
 		var cached: Array[int] = []
-		cached.assign(shuffled_event_options[t])
+		if raw_cached is Array or raw_cached is PackedInt32Array or raw_cached is PackedInt64Array:
+			for elem in raw_cached:
+				cached.append(_to_int(elem))
 		return cached
 	var ev := ContentDB.get_event_by_turn(t) if ContentDB != null else null
 	var indices: Array[int] = []
@@ -1197,7 +1200,7 @@ func enact_decree(id: String) -> Dictionary:
 				factions[fk]["seats"] = maxi(0, int(factions[fk]["seats"]) + int(seat_changes[raw_fk]))
 
 	if opp != null and opp.has_method("record_seat_transfer"):
-		opp.call("record_seat_transfer", adv_seat_snap, id)
+		opp.call("record_seat_transfer", adv_seat_snap)
 
 	if not decree.stat_effects.is_empty():
 		apply_effects(decree.stat_effects, false)
@@ -1244,7 +1247,7 @@ func enact_decree(id: String) -> Dictionary:
 
 	if opp != null:
 		if opp.has_method("on_decree_enacted"):
-			opp.call("on_decree_enacted", id, decree)
+			opp.call("on_decree_enacted", decree)
 		elif decree.military_shock > 0 and opp.has_method("apply_military_shock"):
 			opp.call("apply_military_shock", float(decree.military_shock))
 
@@ -2060,85 +2063,114 @@ func restore_state(data: Dictionary) -> void:
 			active_difficulty_data = ContentDB.get_difficulty("historical")
 
 	game_started = bool(data.get("game_started", true))
-	current_turn = int(data.get("current_turn", 1))
+	current_turn = _to_int(data.get("current_turn", 1), 1)
 	is_action_phase = bool(data.get("is_action_phase", false))
 	show_option_effects = bool(data.get("show_option_effects", false))
 	if selected_difficulty == "historical":
 		show_option_effects = false
 
 	turn_executive_used = bool(data.get("turn_executive_used", false))
-	var tfu: Variant = data.get("turn_faction_used", {})
-	turn_faction_used = tfu.duplicate(true) if tfu is Dictionary else {}
-	turn_faction_count = int(data.get("turn_faction_count", _compute_turn_faction_count()))
+	turn_faction_used = _to_int_dict(data.get("turn_faction_used", {}))
+	turn_faction_count = _to_int(data.get("turn_faction_count", _compute_turn_faction_count()), _compute_turn_faction_count())
 	event_resolved_this_turn = bool(data.get("event_resolved_this_turn", false))
 
 	var saved_stats: Variant = data.get("stats", {})
 	if saved_stats is Dictionary:
 		for sk in STAT_KEYS:
 			if saved_stats.has(sk):
-				stats[sk] = int(saved_stats[sk])
-	pc = int(data.get("pc", 20))
-	global_malus = float(data.get("global_malus", 0.0))
+				stats[sk] = _to_int(saved_stats[sk], int(stats.get(sk, 0)))
+	pc = _to_int(data.get("pc", 20), 20)
+	global_malus = _to_float(data.get("global_malus", 0.0), 0.0)
 
 	var saved_factions: Variant = data.get("factions", {})
 	if saved_factions is Dictionary:
 		for fk in saved_factions.keys():
+			var fk_str := str(fk)
 			if saved_factions[fk] is Dictionary:
-				factions[String(fk)] = saved_factions[fk].duplicate(true)
+				var base_fac: Dictionary = factions[fk_str] if factions.has(fk_str) else {}
+				factions[fk_str] = _normalize_faction_entry(fk_str, saved_factions[fk], base_fac)
 
 	var saved_order: Variant = data.get("active_faction_order", INITIAL_PORTRAIT_FACTIONS)
 	var restored_order := PackedStringArray()
 	if saved_order is Array or saved_order is PackedStringArray:
 		for item in saved_order:
-			restored_order.append(String(item))
+			restored_order.append(str(item))
 	if restored_order.is_empty():
 		restored_order = PackedStringArray(INITIAL_PORTRAIT_FACTIONS)
 	active_faction_order = restored_order
 
-	active_decrees = _dup_dict(data.get("active_decrees", {}))
-	banned_factions = _dup_dict(data.get("banned_factions", {}))
-	total_seats_vacated = int(data.get("total_seats_vacated", 0))
+	active_decrees = _to_bool_dict(data.get("active_decrees", {}))
+	banned_factions = _to_bool_dict(data.get("banned_factions", {}))
+	total_seats_vacated = _to_int(data.get("total_seats_vacated", 0), 0)
 
 	gazette_history.clear()
 	var gh: Variant = data.get("gazette_history", [])
 	if gh is Array:
 		for entry in gh:
 			if entry is Dictionary:
-				gazette_history.append(entry.duplicate(true))
+				var norm_entry: Dictionary = entry.duplicate(true)
+				if norm_entry.has("id"):
+					norm_entry["id"] = str(norm_entry["id"])
+				if norm_entry.has("turn"):
+					norm_entry["turn"] = _to_int(norm_entry["turn"], 1)
+				if norm_entry.has("date_str"):
+					norm_entry["date_str"] = str(norm_entry["date_str"])
+				if norm_entry.has("text_key"):
+					norm_entry["text_key"] = str(norm_entry["text_key"])
+				if norm_entry.has("seats_vacated"):
+					norm_entry["seats_vacated"] = _to_int(norm_entry["seats_vacated"], 0)
+				if norm_entry.has("dissolved_factions") and norm_entry["dissolved_factions"] is Array:
+					var df_arr: Array[String] = []
+					for df in norm_entry["dissolved_factions"]:
+						df_arr.append(str(df))
+					norm_entry["dissolved_factions"] = df_arr
+				gazette_history.append(norm_entry)
 
-	min_stats = _dup_dict(data.get("min_stats", {"pop": 0, "mil": 0, "ref": 0, "econ": 0, "intl": 0, "stab": 0}))
-	max_cendana = int(data.get("max_cendana", 100))
-	min_factions = _dup_dict(data.get("min_factions", {}))
+	min_stats = {"pop": 0, "mil": 0, "ref": 0, "econ": 0, "intl": 0, "stab": 0}
+	var loaded_min_stats := _to_int_dict(data.get("min_stats", {}))
+	for msk in loaded_min_stats.keys():
+		min_stats[msk] = int(loaded_min_stats[msk])
+	max_cendana = _to_int(data.get("max_cendana", 100), 100)
+	min_factions = _to_float_dict(data.get("min_factions", {}))
 
-	action_cooldowns = _dup_dict(data.get("action_cooldowns", {}))
-	action_usage_count = _dup_dict(data.get("action_usage_count", {}))
-	faction_cooldowns = _dup_dict(data.get("faction_cooldowns", {}))
-	faction_usage_count = _dup_dict(data.get("faction_usage_count", {}))
-	completed_interactions = _dup_dict(data.get("completed_interactions", {}))
-	horse_trade_counts = _dup_dict(data.get("horse_trade_counts", {}))
-	shuffled_event_options = _dup_dict(data.get("shuffled_event_options", {}))
+	action_cooldowns = _to_int_dict(data.get("action_cooldowns", {}))
+	action_usage_count = _to_int_dict(data.get("action_usage_count", {}))
+	faction_cooldowns = _to_int_dict(data.get("faction_cooldowns", {}))
+	faction_usage_count = _to_int_dict(data.get("faction_usage_count", {}))
+	completed_interactions = _to_bool_dict(data.get("completed_interactions", {}))
+	horse_trade_counts = _to_int_dict(data.get("horse_trade_counts", {}))
+	shuffled_event_options = _normalize_shuffled_options(data.get("shuffled_event_options", {}))
 
 	pc_log.clear()
 	var pl: Variant = data.get("pc_log", [])
 	if pl is Array:
 		for entry in pl:
 			if entry is Dictionary:
-				pc_log.append(entry.duplicate(true))
+				var norm_pl: Dictionary = entry.duplicate(true)
+				if norm_pl.has("turn"):
+					norm_pl["turn"] = _to_int(norm_pl["turn"], 1)
+				if norm_pl.has("delta"):
+					norm_pl["delta"] = _to_int(norm_pl["delta"], 0)
+				if norm_pl.has("balance_after"):
+					norm_pl["balance_after"] = _to_int(norm_pl["balance_after"], 0)
+				if norm_pl.has("reason"):
+					norm_pl["reason"] = str(norm_pl["reason"])
+				pc_log.append(norm_pl)
 
-	prev_stats_snapshot = _dup_dict(data.get("prev_stats_snapshot", stats))
+	prev_stats_snapshot = _to_int_dict(data.get("prev_stats_snapshot", stats))
 
-	decrees_enacted_count = int(data.get("decrees_enacted_count", active_decrees.size()))
-	routines_used_count = int(data.get("routines_used_count", 0))
-	faction_deals_count = int(data.get("faction_deals_count", 0))
-	final_appeals_count = int(data.get("final_appeals_count", 0))
-	favor_built_total = int(data.get("favor_built_total", 0))
-	horse_trades_total = int(data.get("horse_trades_total", 0))
+	decrees_enacted_count = _to_int(data.get("decrees_enacted_count", active_decrees.size()), active_decrees.size())
+	routines_used_count = _to_int(data.get("routines_used_count", 0), 0)
+	faction_deals_count = _to_int(data.get("faction_deals_count", 0), 0)
+	final_appeals_count = _to_int(data.get("final_appeals_count", 0), 0)
+	favor_built_total = _to_int(data.get("favor_built_total", 0), 0)
+	horse_trades_total = _to_int(data.get("horse_trades_total", 0), 0)
 
-	lowest_gov_stability = int(data.get("lowest_gov_stability", get_gov_stability()))
-	min_stat_watermarks = _dup_dict(data.get("min_stat_watermarks", stats))
-	max_stat_watermarks = _dup_dict(data.get("max_stat_watermarks", stats))
-	bank_bali_clean_steps = _dup_dict(data.get("bank_bali_clean_steps", {}))
-	timor_promise_steps = _dup_dict(data.get("timor_promise_steps", {}))
+	lowest_gov_stability = _to_int(data.get("lowest_gov_stability", get_gov_stability()), get_gov_stability())
+	min_stat_watermarks = _to_int_dict(data.get("min_stat_watermarks", stats))
+	max_stat_watermarks = _to_int_dict(data.get("max_stat_watermarks", stats))
+	bank_bali_clean_steps = _to_bool_dict(data.get("bank_bali_clean_steps", {}))
+	timor_promise_steps = _to_bool_dict(data.get("timor_promise_steps", {}))
 	sp3_upheld_with_high_cendana = bool(data.get("sp3_upheld_with_high_cendana", false))
 	helped_rais_speaker = bool(data.get("helped_rais_speaker", false))
 
@@ -2153,7 +2185,92 @@ func restore_state(data: Dictionary) -> void:
 	state_changed.emit()
 
 
-static func _dup_dict(v: Variant) -> Dictionary:
+static func _to_int(v: Variant, fallback: int = 0) -> int:
+	match typeof(v):
+		TYPE_INT:
+			return v
+		TYPE_FLOAT:
+			return _js_round(v)
+		TYPE_BOOL:
+			return 1 if v else 0
+		TYPE_STRING, TYPE_STRING_NAME:
+			var s := str(v).strip_edges()
+			if s.is_valid_int():
+				return s.to_int()
+			if s.is_valid_float():
+				return _js_round(s.to_float())
+			return fallback
+		_:
+			return fallback
+
+
+static func _to_float(v: Variant, fallback: float = 0.0) -> float:
+	match typeof(v):
+		TYPE_FLOAT:
+			return v
+		TYPE_INT:
+			return float(v)
+		TYPE_STRING, TYPE_STRING_NAME:
+			var s := str(v).strip_edges()
+			if s.is_valid_float():
+				return s.to_float()
+			return fallback
+		_:
+			return fallback
+
+
+static func _to_int_dict(v: Variant) -> Dictionary:
+	var out: Dictionary = {}
 	if v is Dictionary:
-		return v.duplicate(true)
-	return {}
+		for k in v.keys():
+			out[str(k)] = _to_int(v[k], 0)
+	return out
+
+
+static func _to_float_dict(v: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if v is Dictionary:
+		for k in v.keys():
+			out[str(k)] = _to_float(v[k], 0.0)
+	return out
+
+
+static func _to_bool_dict(v: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if v is Dictionary:
+		for k in v.keys():
+			out[str(k)] = bool(v[k])
+	return out
+
+
+static func _normalize_faction_entry(fk_str: String, raw: Dictionary, defaults: Dictionary) -> Dictionary:
+	var out: Dictionary = defaults.duplicate(true)
+	for k in raw.keys():
+		out[str(k)] = raw[k]
+	out["id"] = str(out.get("id", fk_str))
+	out["seats"] = _to_int(out.get("seats", defaults.get("seats", 0)), 0)
+	var aff := _to_float(out.get("affinity", defaults.get("affinity", 0.0)), 0.0)
+	out["affinity"] = aff
+	out["base_affinity"] = _to_float(out.get("base_affinity", defaults.get("base_affinity", aff)), aff)
+	out["favor"] = _to_int(out.get("favor", defaults.get("favor", 0)), 0)
+	out["has_merged"] = bool(out.get("has_merged", defaults.get("has_merged", false)))
+	for str_key in ["name_key", "portrait_name_key", "short_key", "summary_key", "biography_key", "image_path", "cover_image_path"]:
+		if out.has(str_key):
+			out[str_key] = str(out[str_key])
+	return out
+
+
+static func _normalize_shuffled_options(v: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if v is Dictionary:
+		for raw_turn in v.keys():
+			var turn_key := _to_int(raw_turn, -1)
+			if turn_key < 0:
+				continue
+			var typed_arr: Array[int] = []
+			var raw_arr: Variant = v[raw_turn]
+			if raw_arr is Array or raw_arr is PackedInt32Array or raw_arr is PackedInt64Array:
+				for elem in raw_arr:
+					typed_arr.append(_to_int(elem, 0))
+			out[turn_key] = typed_arr
+	return out
