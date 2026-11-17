@@ -20,6 +20,11 @@ static func _rand_int_below(r: RandomNumberGenerator, upper_exclusive: int) -> i
 
 
 func compute_election_roll_call(rng: RandomNumberGenerator = null) -> Dictionary:
+	if CampaignManager != null and CampaignManager.game_started:
+		var save_svc := get_node_or_null("/root/SaveAndSettingsService")
+		if save_svc != null and save_svc.has_method("save_campaign_slot"):
+			save_svc.call("save_campaign_slot", "autosave")
+
 	var r := rng
 	if r == null:
 		r = RandomNumberGenerator.new()

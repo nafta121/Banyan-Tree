@@ -791,6 +791,7 @@ func choose_event_option(option_idx: int) -> Dictionary:
 	_notify_achievements_mid_campaign()
 	if opp != null and opp.has_method("flush_popups"):
 		opp.call("flush_popups")
+	_trigger_autosave()
 	state_changed.emit()
 
 	return {
@@ -945,6 +946,7 @@ func execute_routine(id: String) -> Dictionary:
 	_notify_achievements_mid_campaign()
 	if opp != null and opp.has_method("flush_popups"):
 		opp.call("flush_popups")
+	_trigger_autosave()
 	state_changed.emit()
 
 	return {
@@ -1268,6 +1270,7 @@ func enact_decree(id: String) -> Dictionary:
 	_notify_achievements_mid_campaign()
 	if opp != null and opp.has_method("flush_popups"):
 		opp.call("flush_popups")
+	_trigger_autosave()
 	state_changed.emit()
 
 	return {
@@ -1567,6 +1570,7 @@ func engage_faction(faction_id: String, deal_id: String) -> Dictionary:
 	_notify_achievements_mid_campaign()
 	if opp != null and opp.has_method("flush_popups"):
 		opp.call("flush_popups")
+	_trigger_autosave()
 	state_changed.emit()
 
 	return {
@@ -1672,6 +1676,7 @@ func execute_horse_trade(faction_id: String, overtures: int) -> Dictionary:
 	var aff_after := float(factions[faction_id]["affinity"])
 	_update_watermarks()
 	_notify_achievements_mid_campaign()
+	_trigger_autosave()
 	state_changed.emit()
 
 	return {
@@ -1952,6 +1957,7 @@ func finish_action_phase() -> void:
 
 	_update_watermarks()
 	_notify_achievements_mid_campaign()
+	_trigger_autosave()
 	state_changed.emit()
 
 
@@ -1983,6 +1989,14 @@ func _notify_achievements_mid_campaign() -> void:
 	var ach := get_node_or_null("/root/AchievementService")
 	if ach != null and ach.has_method("evaluate_mid_campaign"):
 		ach.call("evaluate_mid_campaign")
+
+
+func _trigger_autosave() -> void:
+	if not game_started:
+		return
+	var save_svc := get_node_or_null("/root/SaveAndSettingsService")
+	if save_svc != null and save_svc.has_method("save_campaign_slot"):
+		save_svc.call("save_campaign_slot", "autosave")
 
 
 func serialize_state() -> Dictionary:

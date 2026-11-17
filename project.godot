@@ -28,6 +28,8 @@ CampaignManager="*res://godot/scripts/autoload/campaign_manager.gd"
 OppositionManager="*res://godot/scripts/autoload/opposition_manager.gd"
 ElectionManager="*res://godot/scripts/autoload/election_manager.gd"
 AchievementService="*res://godot/scripts/autoload/achievement_service.gd"
+AudioController="*res://godot/scripts/autoload/audio_controller.gd"
+SaveAndSettingsService="*res://godot/scripts/autoload/save_and_settings_service.gd"
 
 [display]
 
