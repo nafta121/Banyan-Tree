@@ -473,6 +473,141 @@ func _test_difficulty_screen_and_dual_mode_sss_board() -> void:
 			(pc_rank_btns[3] as Button).pressed.emit()
 	assert_eq(int(SSSController.levels.get("pc", -1)), 20, "first unlocked rank button click after mouse pan applies rank 20 immediately")
 
+	# Round 2: Android paired emulated-mouse (DEVICE_ID_EMULATION) + ScreenTouch / ScreenDrag sequences
+	diff_screen.call("set_sss_card_rank", "pc", 0)
+	assert_false(SSSController.is_card_unlocked("passive"), "passive locked again for Android touch tests")
+	graph.reset_view()
+	graph.highlighted_card_id = ""
+
+	var focused_events: Array[String] = []
+	var focus_cb := func(cid: String) -> void: focused_events.append(cid)
+	graph.card_focused.connect(focus_cb)
+
+	# (1) Android touch-pan over locked card: emulated Mouse down + ScreenTouch down -> emulated MouseMotion + ScreenDrag -> emulated Mouse up + ScreenTouch up
+	if passive_panel != null:
+		var emu_down := InputEventMouseButton.new()
+		emu_down.device = InputEvent.DEVICE_ID_EMULATION
+		emu_down.button_index = MOUSE_BUTTON_LEFT
+		emu_down.pressed = true
+		passive_panel.gui_input.emit(emu_down)
+		graph._gui_input(emu_down)
+
+		var st_down := InputEventScreenTouch.new()
+		st_down.pressed = true
+		passive_panel.gui_input.emit(st_down)
+		graph._gui_input(st_down)
+
+		var emu_motion := InputEventMouseMotion.new()
+		emu_motion.device = InputEvent.DEVICE_ID_EMULATION
+		emu_motion.relative = Vector2(-80.0, -30.0)
+		graph._gui_input(emu_motion)
+
+		var sd_drag := InputEventScreenDrag.new()
+		sd_drag.relative = Vector2(-80.0, -30.0)
+		graph._gui_input(sd_drag)
+
+		var emu_up := InputEventMouseButton.new()
+		emu_up.device = InputEvent.DEVICE_ID_EMULATION
+		emu_up.button_index = MOUSE_BUTTON_LEFT
+		emu_up.pressed = false
+		passive_panel.gui_input.emit(emu_up)
+		graph._gui_input(emu_up)
+
+		var st_up := InputEventScreenTouch.new()
+		st_up.pressed = false
+		passive_panel.gui_input.emit(st_up)
+		graph._gui_input(st_up)
+
+	assert_near(graph.get_pan_offset().x, -80.0, 0.5, "Android touch-pan pans 1x (-80px), not 2x (-160px)")
+	assert_near(graph.get_pan_offset().y, -30.0, 0.5, "Android touch-pan y pans 1x (-30px), not 2x (-60px)")
+	assert_eq(focused_events.size(), 0, "Android touch-pan over locked card never fires card_focused / _on_card_tapped")
+	assert_eq(graph.highlighted_card_id, "", "Android touch-pan over locked card leaves highlighted_card_id empty")
+
+	# (2) Clean Android touch tap on a locked card: fires card_focused EXACTLY once
+	focused_events.clear()
+	if passive_panel != null:
+		var emu_tap_down := InputEventMouseButton.new()
+		emu_tap_down.device = InputEvent.DEVICE_ID_EMULATION
+		emu_tap_down.button_index = MOUSE_BUTTON_LEFT
+		emu_tap_down.pressed = true
+		passive_panel.gui_input.emit(emu_tap_down)
+		graph._gui_input(emu_tap_down)
+
+		var st_tap_down := InputEventScreenTouch.new()
+		st_tap_down.pressed = true
+		passive_panel.gui_input.emit(st_tap_down)
+		graph._gui_input(st_tap_down)
+
+		var emu_tap_up := InputEventMouseButton.new()
+		emu_tap_up.device = InputEvent.DEVICE_ID_EMULATION
+		emu_tap_up.button_index = MOUSE_BUTTON_LEFT
+		emu_tap_up.pressed = false
+		passive_panel.gui_input.emit(emu_tap_up)
+		graph._gui_input(emu_tap_up)
+
+		var st_tap_up := InputEventScreenTouch.new()
+		st_tap_up.pressed = false
+		passive_panel.gui_input.emit(st_tap_up)
+		graph._gui_input(st_tap_up)
+
+	assert_eq(focused_events.size(), 1, "Clean Android touch tap on locked card emits card_focused exactly once")
+	assert_eq(graph.highlighted_card_id, "passive", "Clean Android touch tap highlights passive")
+
+	# (3) Clean Android touch tap on an unlocked rank Button: applies rank and emits card_focused EXACTLY once
+	focused_events.clear()
+	if pc_panel != null:
+		var pc_btns := pc_panel.find_children("*", "Button", true, false)
+		var btn_rank3 := pc_btns[3] as Button
+		# Emulated mouse down consumed by BaseButton -> button_down, followed by ScreenTouch(down) bubbling to panel & graph
+		btn_rank3.button_down.emit()
+		var st_btn_down := InputEventScreenTouch.new()
+		st_btn_down.pressed = true
+		pc_panel.gui_input.emit(st_btn_down)
+		graph._gui_input(st_btn_down)
+
+		# Emulated mouse up consumed by BaseButton -> pressed + button_up, followed by ScreenTouch(up) bubbling to panel & graph
+		btn_rank3.pressed.emit()
+		btn_rank3.button_up.emit()
+		var st_btn_up := InputEventScreenTouch.new()
+		st_btn_up.pressed = false
+		pc_panel.gui_input.emit(st_btn_up)
+		graph._gui_input(st_btn_up)
+
+	assert_eq(int(SSSController.levels.get("pc", -1)), 20, "Android touch tap on unlocked rank button applies rank 20")
+	assert_eq(focused_events.size(), 1, "Android touch tap on unlocked rank button emits card_focused exactly once")
+
+	# (4) Android touch-pan starting & releasing over an unlocked rank Button: neither rank change nor card_focused fires
+	diff_screen.call("set_sss_card_rank", "pc", 0)
+	graph.highlighted_card_id = ""
+	focused_events.clear()
+	if pc_panel != null:
+		var pc_btns2 := pc_panel.find_children("*", "Button", true, false)
+		var btn_rank2 := pc_btns2[2] as Button
+		btn_rank2.button_down.emit()
+		var st_bdrag_down := InputEventScreenTouch.new()
+		st_bdrag_down.pressed = true
+		pc_panel.gui_input.emit(st_bdrag_down)
+		graph._gui_input(st_bdrag_down)
+
+		var sd_bdrag := InputEventScreenDrag.new()
+		sd_bdrag.relative = Vector2(-50.0, 0.0)
+		graph._gui_input(sd_bdrag)
+
+		# Stray button_down mid-gesture must not wipe _drag_accum
+		btn_rank2.button_down.emit()
+
+		# Emulated mouse release inside button emits pressed + button_up, followed by ScreenTouch(up) bubbling to panel & graph
+		btn_rank2.pressed.emit()
+		btn_rank2.button_up.emit()
+		var st_bdrag_up := InputEventScreenTouch.new()
+		st_bdrag_up.pressed = false
+		pc_panel.gui_input.emit(st_bdrag_up)
+		graph._gui_input(st_bdrag_up)
+
+	assert_eq(int(SSSController.levels.get("pc", -1)), 0, "Android touch-pan over unlocked rank button does not change card rank")
+	assert_eq(focused_events.size(), 0, "Android touch-pan over unlocked rank button does not emit card_focused")
+	graph.card_focused.disconnect(focus_cb)
+
 	# Round 1 (3): Both forecast CheckBoxes wrap text cleanly without mid-word clipping on 412px portrait
 	var std_cb := diff_screen.get("chk_standard_forecast") as CheckBox
 	var hide_cb := diff_screen.get("chk_sss_hide_forecast") as CheckBox

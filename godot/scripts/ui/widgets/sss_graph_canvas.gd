@@ -21,6 +21,7 @@ var highlighted_card_id: String = ""
 var _pan_offset: Vector2 = Vector2.ZERO
 var _dragging: bool = false
 var _drag_accum: float = 0.0
+var _button_handled_gesture: bool = false
 
 var _board_surface: Control = null
 var _edge_layer: _SSSEdgeLayer = null
@@ -137,22 +138,29 @@ func _gui_input(event: InputEvent) -> void:
 		var st := event as InputEventScreenTouch
 		_dragging = st.pressed
 		_drag_accum = 0.0
+		_button_handled_gesture = false
 	elif event is InputEventScreenDrag:
 		var sd := event as InputEventScreenDrag
 		_drag_accum += sd.relative.length()
 		pan_by(sd.relative)
 		accept_event()
 	elif event is InputEventMouseButton:
+		if event.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			_dragging = mb.pressed
 			_drag_accum = 0.0
-	elif event is InputEventMouseMotion and _dragging:
-		var mm := event as InputEventMouseMotion
-		_drag_accum += mm.relative.length()
-		if _drag_accum > 6.0:
-			pan_by(mm.relative)
-			accept_event()
+			_button_handled_gesture = false
+	elif event is InputEventMouseMotion:
+		if event.device == InputEvent.DEVICE_ID_EMULATION:
+			return
+		if _dragging:
+			var mm := event as InputEventMouseMotion
+			_drag_accum += mm.relative.length()
+			if _drag_accum > 6.0:
+				pan_by(mm.relative)
+				accept_event()
 
 
 func _build_board_nodes() -> void:
@@ -252,7 +260,11 @@ func _create_card_node(card: SSSCardData) -> Dictionary:
 		rb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		rb.mouse_filter = Control.MOUSE_FILTER_PASS
 		var cid := card.id
-		rb.button_down.connect(func() -> void: _drag_accum = 0.0)
+		rb.button_down.connect(func() -> void:
+			if not _dragging:
+				_drag_accum = 0.0
+				_button_handled_gesture = false
+		)
 		rb.pressed.connect(func() -> void: _on_rank_button_pressed(cid, rk_val))
 		rank_row.add_child(rb)
 		rank_btns.append(rb)
@@ -268,13 +280,15 @@ func _create_card_node(card: SSSCardData) -> Dictionary:
 
 
 func _on_card_panel_gui_input(card_id: String, event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.device == InputEvent.DEVICE_ID_EMULATION:
+		return
 	var is_release := false
 	if event is InputEventScreenTouch:
 		is_release = not (event as InputEventScreenTouch).pressed
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		is_release = (mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed)
-	if is_release and _drag_accum <= 10.0:
+	if is_release and not _button_handled_gesture and _drag_accum <= 10.0:
 		_on_card_tapped(card_id)
 
 
@@ -291,6 +305,7 @@ func _on_card_tapped(card_id: String) -> void:
 
 
 func _on_rank_button_pressed(card_id: String, rank_val: int) -> void:
+	_button_handled_gesture = true
 	if _drag_accum > 10.0:
 		_drag_accum = 0.0
 		return
