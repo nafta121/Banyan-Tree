@@ -18,6 +18,7 @@ func run() -> int:
 	await _test_boot_loader_screen_random_messages_and_transition()
 	await _test_title_screen_thumb_zone_sheets_changelog_and_toggles()
 	await _test_difficulty_screen_and_dual_mode_sss_board()
+	await _test_campaign_shell_and_five_tabs_flow()
 
 	await tree.process_frame
 	await tree.process_frame
@@ -662,3 +663,249 @@ func _test_difficulty_screen_and_dual_mode_sss_board() -> void:
 
 	diff_screen.queue_free()
 	await tree.process_frame
+
+
+func _test_campaign_shell_and_five_tabs_flow() -> void:
+	LocaleService.set_locale("id")
+	ThemeManager.apply_theme("midnight_slate", 1.0)
+	SaveAndSettingsService.settings.show_exact_numbers = false
+	SaveAndSettingsService.settings.auto_advance_turn = false
+	SaveAndSettingsService.save_settings()
+
+	CampaignManager.rng.seed = 19980521
+	OppositionManager.rng.seed = 19980521
+	CampaignManager.start_new_campaign("easy", true)
+
+	var packed := ResourceLoader.load("res://godot/scenes/campaign_shell_screen.tscn") as PackedScene
+	assert_true(packed != null, "campaign_shell_screen.tscn loads as PackedScene")
+	if packed == null:
+		return
+
+	var camp := packed.instantiate()
+	assert_true(camp != null, "campaign_shell_screen.tscn instantiates cleanly")
+	camp.set("allow_scene_change", false)
+	tree.root.add_child(camp)
+	await tree.process_frame
+	await tree.process_frame
+
+	var shell := camp.get("shell") as SafeAreaShell
+	assert_true(shell != null, "CampaignShellScreen mounts SafeAreaShell")
+	var half_y := float(ProjectSettings.get_setting("display/window/size/viewport_height")) * 0.5
+
+	# 1. Verify 5 bottom tabs (>= 56px height, in lower thumb zone) and switching across all 5 tabs
+	var tab_btns: Array = camp.call("get_tab_buttons")
+	assert_eq(tab_btns.size(), 5, "CampaignShellScreen exposes 5 bottom tab buttons")
+	var tab0_y := 915.0
+	for i in range(tab_btns.size()):
+		var tb := tab_btns[i] as Button
+		assert_true(tb != null, "Tab %d is a Button" % i)
+		if tb != null:
+			assert_true(tb.size.y >= 56.0 or tb.get_combined_minimum_size().y >= 56.0, "Tab %d height >= 56px" % i)
+			assert_true(tb.global_position.y >= half_y, "Tab %d sits in lower thumb zone" % i)
+			if i == 0:
+				tab0_y = tb.global_position.y
+
+	for idx in [1, 2, 3, 4, 0]:
+		camp.call("switch_tab", idx)
+		await tree.process_frame
+		assert_eq(int(camp.call("get_active_tab_index")), idx, "Switched cleanly to tab %d" % idx)
+		var view_ctrl := camp.call("get_tab_view", idx) as Control
+		assert_true(view_ctrl != null and view_ctrl.visible, "Tab view %d is visible" % idx)
+
+	# Android Back on secondary tab returns to Agenda tab (0)
+	camp.call("switch_tab", 3)
+	shell.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+	assert_eq(int(camp.call("get_active_tab_index")), 0, "Android Back on tab 3 returns to Agenda tab 0")
+
+	# 2. Crisis Option on Turn 1 -> EditorialPressSheet in BottomSheetHost (fog hides deltas vs exact shows deltas)
+	var agenda_tab := camp.call("get_tab_view", 0) as Control
+	assert_true(agenda_tab != null, "AgendaTabView exists")
+	var opt_res: Dictionary = agenda_tab.call("select_crisis_option", 0)
+	assert_true(bool(opt_res.get("ok", false)), "Turn 1 crisis option 0 resolved")
+	await tree.process_frame
+
+	assert_eq(shell.bottom_sheet_host.get_open_count(), 1, "Choosing crisis option pushes EditorialPressSheet onto BottomSheetHost")
+	var press_sheet := camp.get("last_press_sheet") as Control
+	assert_true(press_sheet != null, "CampaignShellScreen records last_press_sheet")
+	if press_sheet != null:
+		assert_false(bool(press_sheet.call("has_visible_numeric_deltas")), "show_exact_numbers == false hides numeric delta chips on press sheet")
+		assert_eq(String(press_sheet.call("get_rendered_deltas_text")), "", "show_exact_numbers == false renders empty delta text")
+
+	shell.bottom_sheet_host.clear_all_sheets()
+	await tree.process_frame
+
+	# Re-run Turn 1 option with show_exact_numbers == true to verify numeric delta chips appear
+	SaveAndSettingsService.settings.show_exact_numbers = true
+	SaveAndSettingsService.save_settings()
+	CampaignManager.rng.seed = 19980521
+	OppositionManager.rng.seed = 19980521
+	CampaignManager.start_new_campaign("easy", true)
+	await tree.process_frame
+
+	var opt_res_exact: Dictionary = agenda_tab.call("select_crisis_option", 0)
+	assert_true(bool(opt_res_exact.get("ok", false)), "Turn 1 crisis option 0 resolved in exact mode")
+	await tree.process_frame
+	assert_eq(shell.bottom_sheet_host.get_open_count(), 1, "EditorialPressSheet pushed in exact mode")
+	var press_sheet_exact := camp.get("last_press_sheet") as Control
+	assert_true(press_sheet_exact != null, "last_press_sheet populated in exact mode")
+	if press_sheet_exact != null:
+		assert_true(bool(press_sheet_exact.call("has_visible_numeric_deltas")), "show_exact_numbers == true reveals numeric delta chips on press sheet")
+		var delta_txt := String(press_sheet_exact.call("get_rendered_deltas_text"))
+		assert_true(delta_txt.contains("+") or delta_txt.contains("-"), "exact mode delta text contains signed numbers: " + delta_txt)
+
+	shell.bottom_sheet_host.clear_all_sheets()
+	SaveAndSettingsService.settings.show_exact_numbers = false
+	SaveAndSettingsService.save_settings()
+	await tree.process_frame
+
+	# 3. Verify Action Phase thumb-zone placement: sub-mode bar & category filter pills sit in lower half right above 5-tab bar
+	assert_true(CampaignManager.is_action_phase, "Campaign is now in Turn 1 Action Phase")
+	await tree.process_frame
+	var bottom_controls: Array = agenda_tab.call("get_bottom_zone_controls")
+	assert_true(bottom_controls.size() >= 2, "AgendaTabView exposes sub-mode bar and category filter bar")
+	for bc_raw in bottom_controls:
+		var bc := bc_raw as Control
+		if bc != null and bc.visible:
+			assert_true(bc.global_position.y >= half_y, "Agenda bottom bar '%s' sits in lower half thumb zone (y=%s)" % [bc.name, str(bc.global_position.y)])
+			assert_true(bc.global_position.y <= tab0_y, "Agenda bottom bar '%s' sits right above the 5-tab bar" % bc.name)
+
+	# Execute 1 Routine + 1 Faction Deal, then end turn -> advances to Turn 2
+	CampaignManager.pc = 50
+	var picked_routine := ""
+	for r in ContentDB.catalog.routines:
+		if bool(CampaignManager.can_execute_routine(r.id).get("ok", false)):
+			picked_routine = r.id
+			break
+	assert_true(not picked_routine.is_empty(), "Found executable routine on Turn 1")
+	var r_out: Dictionary = agenda_tab.call("execute_routine_by_id", picked_routine)
+	assert_true(bool(r_out.get("ok", false)), "Executed 1 routine via AgendaTabView")
+	shell.bottom_sheet_host.clear_all_sheets()
+
+	agenda_tab.call("set_action_submode", "factions")
+	await tree.process_frame
+	agenda_tab.call("select_faction", "golkar_habibie")
+	await tree.process_frame
+	assert_true(bool(agenda_tab.call("has_golkar_pillars_widget")), "Viewing golkar_habibie displays Three Pillars (A, B, G) widget")
+
+	var picked_deal := ""
+	for d in CampaignManager.get_faction_deals("golkar_habibie"):
+		if not d.is_final_appeal and bool(CampaignManager.can_engage_faction("golkar_habibie", d.id).get("ok", false)):
+			picked_deal = d.id
+			break
+	assert_true(not picked_deal.is_empty(), "Found executable faction deal on Turn 1")
+	var f_out: Dictionary = agenda_tab.call("engage_faction_deal", "golkar_habibie", picked_deal)
+	assert_true(bool(f_out.get("ok", false)), "Executed 1 faction deal via AgendaTabView")
+	shell.bottom_sheet_host.clear_all_sheets()
+
+	agenda_tab.call("end_turn")
+	await tree.process_frame
+	assert_eq(CampaignManager.current_turn, 2, "Ending Turn 1 action phase advances campaign to Turn 2")
+	assert_true(String(camp.call("get_header_summary_text")).contains("2/23"), "CampaignShellScreen header updates to Turn 2/23")
+
+	# 4. Verify Turn 21 Final Appeal (0 PC) & Turn 22 Horse-Trading Desk BottomSheet
+	CampaignManager.current_turn = 21
+	CampaignManager.is_action_phase = true
+	CampaignManager.event_resolved_this_turn = true
+	CampaignManager.turn_faction_used.clear()
+	CampaignManager.turn_faction_count = 0
+	CampaignManager.factions["golkar_akbar"]["favor"] = 1
+	CampaignManager.state_changed.emit()
+	await tree.process_frame
+
+	agenda_tab.call("set_action_submode", "factions")
+	agenda_tab.call("select_faction", "golkar_akbar")
+	await tree.process_frame
+	assert_true(bool(agenda_tab.call("has_golkar_pillars_widget")), "Viewing golkar_akbar displays Three Pillars (A, B, G) widget")
+	assert_true(bool(agenda_tab.call("is_final_appeal_visible")), "Turn 21 shows Final Appeal (0 PC) button")
+	var fa_out: Dictionary = agenda_tab.call("trigger_final_appeal", "golkar_akbar")
+	assert_true(bool(fa_out.get("ok", false)), "Turn 21 Final Appeal cashed out favor at 0 PC")
+	shell.bottom_sheet_host.clear_all_sheets()
+
+	CampaignManager.current_turn = 22
+	CampaignManager.is_action_phase = true
+	CampaignManager.event_resolved_this_turn = true
+	CampaignManager.pc = 15
+	CampaignManager.state_changed.emit()
+	await tree.process_frame
+
+	assert_true(bool(agenda_tab.call("is_horse_trading_button_visible")), "Turn 22 shows Horse-Trading Desk button")
+	var ht_sheet := agenda_tab.call("open_horse_trading_sheet") as Control
+	assert_true(ht_sheet != null and shell.bottom_sheet_host.get_open_count() == 1, "Horse-Trading Desk opens inside BottomSheetHost")
+	var pc_before_ht := CampaignManager.pc
+	var ht_res: Dictionary = agenda_tab.call("horse_trade_from_sheet", "ppp", 1)
+	assert_true(bool(ht_res.get("ok", false)), "Horse-Trading +1 overture executed cleanly")
+	assert_eq(CampaignManager.pc, pc_before_ht - 1, "Horse-Trading +1 overture spent 1 PC")
+	shell.bottom_sheet_host.clear_all_sheets()
+
+	# 5. Verify StatDashboardTabView (Tab 1) & MPRParliamentTabView (Tab 2)
+	camp.call("switch_tab", 1)
+	await tree.process_frame
+	var stat_tab := camp.call("get_tab_view", 1) as Control
+	assert_eq(int(stat_tab.call("get_stat_card_count")), 7, "StatDashboardTabView mounts all 7 StatCardWidgets")
+
+	camp.call("switch_tab", 2)
+	await tree.process_frame
+	var mpr_tab := camp.call("get_tab_view", 2) as Control
+	var hemi := mpr_tab.call("get_hemicycle_canvas") as Control
+	assert_true(hemi != null, "MPRParliamentTabView mounts HemicycleCanvas")
+	if hemi != null:
+		assert_eq(int(hemi.call("get_seat_count")), 700, "HemicycleCanvas renders all 700 MPR seats")
+
+	# 6. Verify LibraryTabView (Tab 3): 112 entries + tapping President portrait toggles biography <-> Criticism essay
+	camp.call("switch_tab", 3)
+	await tree.process_frame
+	var lib_tab := camp.call("get_tab_view", 3) as Control
+	assert_eq(int(lib_tab.call("get_filtered_count")), 112, "LibraryTabView shows all 112 entries under 'all'")
+	lib_tab.call("set_category", "presidents")
+	await tree.process_frame
+	assert_eq(int(lib_tab.call("get_filtered_count")), 8, "LibraryTabView filters 8 Presidents")
+
+	var pres_id := String(lib_tab.call("get_first_visible_entry_id"))
+	assert_true(not pres_id.is_empty(), "Found first President entry id")
+	var bio_text := String(lib_tab.call("get_entry_rendered_body", pres_id))
+	assert_false(bool(lib_tab.call("is_entry_showing_alt", pres_id)), "President starts on biography view")
+	var portrait_btn := lib_tab.find_child("PortraitToggle_" + pres_id, true, false) as Button
+	assert_true(portrait_btn != null, "President card exposes interactive PortraitToggle button")
+	if portrait_btn != null:
+		portrait_btn.pressed.emit()
+	await tree.process_frame
+	assert_true(bool(lib_tab.call("is_entry_showing_alt", pres_id)), "Tapping President portrait toggles to Criticism essay")
+	var crit_text := String(lib_tab.call("get_entry_rendered_body", pres_id))
+	assert_true(not crit_text.is_empty() and crit_text != bio_text, "Criticism essay text differs from biography text")
+
+	# 7. Verify MoreDrawerTabView (Tab 4): Music Player, Save/Load + Backup, Achievements, Tutorial, & Settings persistence
+	camp.call("switch_tab", 4)
+	await tree.process_frame
+	var more_tab := camp.call("get_tab_view", 4) as Control
+
+	more_tab.call("set_music_genre", "critique")
+	more_tab.call("set_weighted_shuffle_enabled", true)
+	assert_eq(AudioController.active_genre, "critique", "Mini Music Player updates active_genre")
+	assert_eq(AudioController.weighted_shuffle, true, "Mini Music Player updates weighted_shuffle")
+
+	assert_true(bool(more_tab.call("save_slot", "slot_1")), "MoreDrawerTabView saves slot_1")
+	var backup_path := "user://test_more_backup.json"
+	assert_true(bool(more_tab.call("export_backup_to", backup_path)), "MoreDrawerTabView exports JSON backup")
+	assert_true(bool(more_tab.call("import_backup_from", backup_path)), "MoreDrawerTabView imports JSON backup")
+	if FileAccess.file_exists(backup_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(backup_path))
+
+	more_tab.call("open_achievements_gallery")
+	assert_eq(shell.bottom_sheet_host.get_open_count(), 1, "MoreDrawerTabView opens 59-Achievement gallery sheet")
+	shell.bottom_sheet_host.clear_all_sheets()
+
+	more_tab.call("open_tutorial_sheet")
+	assert_eq(shell.bottom_sheet_host.get_open_count(), 1, "MoreDrawerTabView opens interactive Portrait Tutorial sheet")
+	shell.bottom_sheet_host.clear_all_sheets()
+
+	more_tab.call("set_exact_numbers_enabled", true)
+	more_tab.call("set_auto_advance_enabled", true)
+	more_tab.call("set_text_scale_value", 1.15)
+	SaveAndSettingsService.load_settings()
+	assert_eq(SaveAndSettingsService.settings.show_exact_numbers, true, "MoreDrawerTabView persists show_exact_numbers")
+	assert_eq(SaveAndSettingsService.settings.auto_advance_turn, true, "MoreDrawerTabView persists auto_advance_turn")
+	assert_near(SaveAndSettingsService.settings.text_scale, 1.15, 0.02, "MoreDrawerTabView persists text_scale 1.15")
+
+	camp.queue_free()
+	await tree.process_frame
+
