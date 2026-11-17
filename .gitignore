@@ -1,0 +1,11 @@
+# Godot 4 cache & generated asset import sidecars
+.godot/
+*.import
+
+# Build artifacts & Android packages
+build/
+*.apk
+*.aab
+
+# Local planning / orchestration workspace
+.superpowers/
