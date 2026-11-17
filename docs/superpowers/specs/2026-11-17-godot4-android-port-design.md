@@ -1,7 +1,7 @@
 # Dokumen Desain: Porting *Twilight of the Banyan Tree* ke Godot 4 Android
 
 > [!IMPORTANT]
-> **Status Dokumen**: Menunggu persetujuan Anda sebelum penulisan rencana implementasi rinci dan pembangunan kode dimulai. Tidak ada berkas di `/home/antigravity/nafta121/Banyan-Tree` yang diubah pada tahap ini.
+> **Status Dokumen**: Disetujui oleh pengguna (`setuju`). Seluruh implementasi dikerjakan secara terisolasi pada cabang `godot4-android` sesuai `docs/superpowers/plans/2026-11-17-godot4-android-port.md`.
 
 ---
 
