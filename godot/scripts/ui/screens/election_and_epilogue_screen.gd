@@ -733,19 +733,20 @@ func _populate_epilogue_text(_is_id: bool) -> void:
 	_epilogue_rtl.text = _epilogue_plain
 
 
-func export_dossier_png(output_path: String = "") -> Error:
-	var target_path := output_path.strip_edges()
-	if target_path.is_empty():
-		var docs_dir := OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
-		if not docs_dir.is_empty() and DirAccess.dir_exists_absolute(docs_dir):
+func export_dossier_png(output_path: String = "", primary_docs_override: String = "") -> Error:
+	var explicit_path := output_path.strip_edges()
+	var using_auto_path := explicit_path.is_empty()
+	var fallback_user_path := "user://exports/keadaan-republik-1999.png"
+	var target_path := explicit_path
+
+	if using_auto_path:
+		var docs_dir := primary_docs_override.strip_edges()
+		if docs_dir.is_empty():
+			docs_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
+		if not docs_dir.is_empty() and (not primary_docs_override.is_empty() or DirAccess.dir_exists_absolute(docs_dir)):
 			target_path = docs_dir.path_join("keadaan-republik-1999.png")
 		else:
-			target_path = "user://exports/keadaan-republik-1999.png"
-
-	var abs_target := ProjectSettings.globalize_path(target_path) if target_path.begins_with("user://") else target_path
-	var parent_dir := abs_target.get_base_dir()
-	if not parent_dir.is_empty() and not DirAccess.dir_exists_absolute(parent_dir):
-		DirAccess.make_dir_recursive_absolute(parent_dir)
+			target_path = fallback_user_path
 
 	var img: Image = null
 	var is_dummy_renderer := (
@@ -759,12 +760,34 @@ func export_dossier_png(output_path: String = "") -> Error:
 	if img == null or img.get_width() != 1080:
 		img = _rasterize_dossier_image_cpu()
 
-	var err := img.save_png(abs_target)
+	var err := _try_save_png_to(img, target_path)
+	if err != OK and using_auto_path and target_path != fallback_user_path:
+		target_path = fallback_user_path
+		err = _try_save_png_to(img, target_path)
+
 	if err == OK:
 		if _dossier_status_label != null:
 			_dossier_status_label.text = "PNG tersimpan (1080px): " + target_path
 		dossier_exported.emit(target_path)
 	return err
+
+
+static func _try_save_png_to(img: Image, path_str: String) -> Error:
+	var is_user_path := path_str.begins_with("user://")
+	var abs_target := ProjectSettings.globalize_path(path_str) if is_user_path else path_str
+	var parent_dir := abs_target.get_base_dir()
+	if not parent_dir.is_empty() and not DirAccess.dir_exists_absolute(parent_dir):
+		if not is_user_path:
+			return ERR_CANT_CREATE
+		var mk_err := DirAccess.make_dir_recursive_absolute(parent_dir)
+		if mk_err != OK and not DirAccess.dir_exists_absolute(parent_dir):
+			return mk_err
+	var probe := FileAccess.open(abs_target, FileAccess.WRITE)
+	if probe == null:
+		var open_err := FileAccess.get_open_error()
+		return open_err if open_err != OK else ERR_FILE_CANT_WRITE
+	probe.close()
+	return img.save_png(abs_target)
 
 
 func _capture_subviewport_dossier_image() -> Image:

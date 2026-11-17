@@ -199,6 +199,9 @@ func _ready() -> void:
 	var save_svc := get_node_or_null("/root/SaveAndSettingsService")
 	if save_svc != null and save_svc.has_signal("slots_changed"):
 		save_svc.connect("slots_changed", refresh_ui)
+	var audio := get_node_or_null("/root/AudioController")
+	if audio != null and audio.has_method("ensure_music_started"):
+		audio.call("ensure_music_started")
 	refresh_ui()
 
 

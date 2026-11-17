@@ -20,6 +20,7 @@ func run() -> int:
 	await _test_difficulty_screen_and_dual_mode_sss_board()
 	await _test_campaign_shell_and_five_tabs_flow()
 	await _test_turn_23_mpr_election_dossier_png_and_epilogue()
+	await _test_soundtrack_autoplay_sfx_and_scoped_storage_png_fallback()
 
 	await tree.process_frame
 	await tree.process_frame
@@ -1021,5 +1022,77 @@ func _test_turn_23_mpr_election_dossier_png_and_epilogue() -> void:
 
 	camp.queue_free()
 	await tree.process_frame
+
+
+func _test_soundtrack_autoplay_sfx_and_scoped_storage_png_fallback() -> void:
+	AudioController.stop_all()
+	AudioController.set_music_enabled(true)
+	AudioController.set_sfx_enabled(true)
+	AudioController.set_sfx_volume(0.8)
+	assert_false(AudioController.is_playing, "Soundtrack initially stopped before screen mount")
+
+	CampaignManager.start_new_campaign("easy", true)
+	var camp_packed := ResourceLoader.load("res://godot/scenes/campaign_shell_screen.tscn") as PackedScene
+	var camp := camp_packed.instantiate()
+	camp.set("allow_scene_change", false)
+	tree.root.add_child(camp)
+	await tree.process_frame
+	await tree.process_frame
+
+	assert_true(AudioController.is_playing, "CampaignShellScreen automatically starts soundtrack when music_enabled")
+	assert_true(AudioController.get_current_track() != null, "Active soundtrack track populated on campaign start")
+
+	# User pause must be respected across screen mounts
+	AudioController.toggle_play_pause()
+	assert_false(AudioController.is_playing, "User pause stops playback")
+	var title_packed := ResourceLoader.load("res://godot/scenes/title_screen.tscn") as PackedScene
+	var title_node := title_packed.instantiate()
+	title_node.set("allow_scene_change", false)
+	tree.root.add_child(title_node)
+	await tree.process_frame
+	assert_false(AudioController.is_playing, "TitleScreen respects explicit user pause without overriding")
+	title_node.queue_free()
+	await tree.process_frame
+
+	# Press alert plays "news" SFX; end_turn plays "notification" SFX
+	var agenda_tab := camp.call("get_tab_view", 0) as Control
+	agenda_tab.call("select_crisis_option", 0)
+	await tree.process_frame
+	assert_eq(String(AudioController.get("last_sfx_id")), "news", "Press reaction sheet plays 'news' SFX")
+
+	var host := (camp.get("shell") as SafeAreaShell).bottom_sheet_host
+	host.clear_all_sheets()
+	await tree.process_frame
+	agenda_tab.call("end_turn")
+	await tree.process_frame
+	assert_eq(String(AudioController.get("last_sfx_id")), "notification", "Ending turn plays 'notification' SFX")
+
+	camp.queue_free()
+	await tree.process_frame
+
+	# Scoped-storage unwritable primary directory fallback to user://exports/keadaan-republik-1999.png
+	var fallback_user_path := "user://exports/keadaan-republik-1999.png"
+	if FileAccess.file_exists(fallback_user_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(fallback_user_path))
+
+	var elec_packed := ResourceLoader.load("res://godot/scenes/election_and_epilogue_screen.tscn") as PackedScene
+	var elec := elec_packed.instantiate()
+	elec.set("allow_scene_change", false)
+	tree.root.add_child(elec)
+	await tree.process_frame
+	elec.call("skip_roll_call")
+	await tree.process_frame
+
+	# Simulate Android 11+ Scoped Storage blocking direct C++ write to primary shared Documents folder
+	var err: int = await elec.call("export_dossier_png", "", "/etc")
+	assert_eq(err, OK, "export_dossier_png falls back cleanly to user://exports when primary Documents dir is unwritable")
+	assert_true(FileAccess.file_exists(fallback_user_path), "Fallback PNG saved at user://exports/keadaan-republik-1999.png")
+	if FileAccess.file_exists(fallback_user_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(fallback_user_path))
+
+	elec.queue_free()
+	await tree.process_frame
+	AudioController.stop_all()
+
 
 

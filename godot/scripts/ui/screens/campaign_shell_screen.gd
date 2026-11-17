@@ -140,6 +140,8 @@ func _ready() -> void:
 		ThemeManager.theme_updated.connect(refresh_all)
 	if AchievementService != null:
 		AchievementService.achievement_unlocked.connect(_on_achievement_unlocked)
+	if AudioController != null:
+		AudioController.ensure_music_started()
 
 	switch_tab(0)
 	refresh_all()
@@ -226,6 +228,8 @@ func _on_press_alert_queued(payload: Dictionary) -> void:
 
 	var is_id := LocaleService == null or LocaleService.current_locale == "id"
 	var kind := String(payload.get("kind", "press"))
+	if AudioController != null:
+		AudioController.play_sfx("notification" if kind == "telex" else "news")
 	var modal_title := ("Kawat Istana" if is_id else "Palace Telex") if kind == "telex" else ("Reaksi Pers" if is_id else "Press Reaction")
 	shell.bottom_sheet_host.push_sheet(sheet, modal_title)
 

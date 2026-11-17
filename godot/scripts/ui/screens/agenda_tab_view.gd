@@ -250,9 +250,9 @@ func select_crisis_option(option_idx: int) -> Dictionary:
 func execute_routine_by_id(routine_id: String) -> Dictionary:
 	if CampaignManager == null:
 		return {"ok": false, "reason": "no_manager"}
-	if AudioController != null:
-		AudioController.play_sfx("click")
 	var out := CampaignManager.execute_routine(routine_id)
+	if AudioController != null and not bool(out.get("ok", false)):
+		AudioController.play_sfx("blocked")
 	refresh_view()
 	return out
 
@@ -260,9 +260,9 @@ func execute_routine_by_id(routine_id: String) -> Dictionary:
 func enact_decree_by_id(decree_id: String) -> Dictionary:
 	if CampaignManager == null:
 		return {"ok": false, "reason": "no_manager"}
-	if AudioController != null:
-		AudioController.play_sfx("click")
 	var out := CampaignManager.enact_decree(decree_id)
+	if AudioController != null and not bool(out.get("ok", false)):
+		AudioController.play_sfx("blocked")
 	refresh_view()
 	return out
 
@@ -270,9 +270,9 @@ func enact_decree_by_id(decree_id: String) -> Dictionary:
 func engage_faction_deal(faction_id: String, deal_id: String) -> Dictionary:
 	if CampaignManager == null:
 		return {"ok": false, "reason": "no_manager"}
-	if AudioController != null:
-		AudioController.play_sfx("click")
 	var out := CampaignManager.engage_faction(faction_id, deal_id)
+	if AudioController != null:
+		AudioController.play_sfx("click" if bool(out.get("ok", false)) else "blocked")
 	refresh_view()
 	return out
 
@@ -280,9 +280,9 @@ func engage_faction_deal(faction_id: String, deal_id: String) -> Dictionary:
 func trigger_final_appeal(faction_id: String) -> Dictionary:
 	if CampaignManager == null:
 		return {"ok": false, "reason": "no_manager"}
-	if AudioController != null:
-		AudioController.play_sfx("click")
 	var out := CampaignManager.execute_final_appeal(faction_id)
+	if AudioController != null:
+		AudioController.play_sfx("click" if bool(out.get("ok", false)) else "blocked")
 	refresh_view()
 	return out
 
@@ -291,7 +291,7 @@ func end_turn() -> void:
 	if CampaignManager == null or not CampaignManager.is_action_phase:
 		return
 	if AudioController != null:
-		AudioController.play_sfx("turn")
+		AudioController.play_sfx("notification")
 	CampaignManager.finish_action_phase()
 	refresh_view()
 

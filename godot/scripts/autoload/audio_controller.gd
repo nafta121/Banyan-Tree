@@ -15,6 +15,7 @@ var music_enabled: bool = true
 var music_volume: float = 0.3
 var sfx_enabled: bool = true
 var sfx_volume: float = 0.8
+var last_sfx_id: String = ""
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
@@ -289,6 +290,22 @@ func set_sfx_volume(linear: float) -> void:
 	_sync_setting("sfx_volume", sfx_volume)
 
 
+func ensure_music_started() -> void:
+	if not music_enabled or is_playing or _music_player == null:
+		return
+	if _music_player.stream != null:
+		# Respect explicit user pause while a stream is already loaded
+		return
+	var tracks := _get_music_tracks()
+	if tracks.is_empty():
+		return
+	var genre_indices := get_genre_track_indices(active_genre)
+	var start_idx := current_track_index
+	if weighted_shuffle or (not genre_indices.is_empty() and not genre_indices.has(start_idx)):
+		start_idx = _pick_candidate_index(-1)
+	play_track(start_idx)
+
+
 func play_sfx(sfx_id: String) -> void:
 	if not sfx_enabled or sfx_volume <= 0.0001 or _sfx_players.is_empty():
 		return
@@ -308,6 +325,7 @@ func play_sfx(sfx_id: String) -> void:
 	if stream == null:
 		return
 
+	last_sfx_id = sfx_id
 	var player := _sfx_players[_sfx_cursor % _sfx_players.size()]
 	_sfx_cursor = (_sfx_cursor + 1) % _sfx_players.size()
 	if not _is_headless_dummy_audio():
@@ -368,6 +386,7 @@ func stop_all() -> void:
 	_sfx_cache.clear()
 	_virtual_playback_pos = 0.0
 	is_playing = false
+	last_sfx_id = ""
 	_track_history.clear()
 
 
