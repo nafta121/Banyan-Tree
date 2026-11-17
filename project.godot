@@ -25,6 +25,9 @@ ContentDB="*res://godot/scripts/autoload/content_db.gd"
 LocaleService="*res://godot/scripts/autoload/locale_service.gd"
 SSSController="*res://godot/scripts/autoload/sss_controller.gd"
 CampaignManager="*res://godot/scripts/autoload/campaign_manager.gd"
+OppositionManager="*res://godot/scripts/autoload/opposition_manager.gd"
+ElectionManager="*res://godot/scripts/autoload/election_manager.gd"
+AchievementService="*res://godot/scripts/autoload/achievement_service.gd"
 
 [display]
 

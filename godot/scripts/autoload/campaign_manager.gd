@@ -174,6 +174,10 @@ func sys_mod(key: String, fallback: float) -> float:
 	return fallback
 
 
+func get_difficulty_data() -> DifficultyData:
+	return _get_diff_data()
+
+
 func _get_diff_data() -> DifficultyData:
 	if active_difficulty_data != null and active_difficulty_data.id == selected_difficulty:
 		return active_difficulty_data
@@ -558,21 +562,15 @@ func _apply_military_delta(delta: float) -> void:
 	if not factions.has("abri") or is_zero_approx(delta):
 		return
 	var opp := get_node_or_null("/root/OppositionManager")
+	var eff_delta := delta
 	if opp != null:
-		var abri_before := float(factions["abri"]["affinity"])
-		if opp.has_method("apply_military_delta"):
-			opp.call("apply_military_delta", delta)
-		elif opp.has_method("on_military_delta"):
+		if delta > 0.0 and opp.has_method("get_military_gain_mult"):
+			eff_delta = delta * float(opp.call("get_military_gain_mult"))
+		elif delta < 0.0 and opp.has_method("on_military_delta"):
 			opp.call("on_military_delta", delta)
-			if is_equal_approx(float(factions["abri"]["affinity"]), abri_before):
-				var mult := 1.0
-				if delta > 0.0 and opp.has_method("get_military_gain_mult"):
-					mult = float(opp.call("get_military_gain_mult"))
-				factions["abri"]["affinity"] = clamp_faction("abri", abri_before + delta * mult)
-		stats["mil"] = _js_round(float(factions["abri"]["affinity"]))
+	if is_zero_approx(eff_delta):
 		return
-
-	factions["abri"]["affinity"] = clamp_faction("abri", float(factions["abri"]["affinity"]) + delta)
+	factions["abri"]["affinity"] = clamp_faction("abri", float(factions["abri"]["affinity"]) + eff_delta)
 	stats["mil"] = _js_round(float(factions["abri"]["affinity"]))
 
 

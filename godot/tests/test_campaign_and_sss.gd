@@ -427,8 +427,16 @@ func _test_floor_ramping_turn_23_ucn_restore_and_task4_seams() -> void:
 	LocaleService.set_locale("id")
 
 	# 5. Seamless Task 4 seams: SSSController.is_unlocked() & combined 0.40 gain_factor floor
-	assert_false(SSSController.is_unlocked(), "SSS locked when AchievementService absent")
 	if tree != null and tree.root != null:
+		var real_ach := tree.root.get_node_or_null("AchievementService")
+		var real_opp := tree.root.get_node_or_null("OppositionManager")
+		if real_ach != null:
+			tree.root.remove_child(real_ach)
+		if real_opp != null:
+			tree.root.remove_child(real_opp)
+
+		assert_false(SSSController.is_unlocked(), "SSS locked when AchievementService absent")
+
 		var mock_ach := _MockAchievementService.new()
 		mock_ach.name = "AchievementService"
 		tree.root.add_child(mock_ach)
@@ -460,6 +468,11 @@ func _test_floor_ramping_turn_23_ucn_restore_and_task4_seams() -> void:
 		mock_opp.free()
 		tree.root.remove_child(mock_ach)
 		mock_ach.free()
+
+		if real_opp != null:
+			tree.root.add_child(real_opp)
+		if real_ach != null:
+			tree.root.add_child(real_ach)
 
 	SSSController.apply_preset(10)
 	SSSController.hide_forecast = true
