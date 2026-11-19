@@ -5,6 +5,8 @@ signal sheet_pushed(open_count: int)
 signal sheet_popped(open_count: int)
 signal stack_emptied()
 
+const _TouchScrollHelper := preload("res://godot/scripts/ui/touch_scroll_helper.gd")
+
 var _sheet_stack: Array[Control] = []
 
 
@@ -173,6 +175,7 @@ func _build_sheet_layer(content: Control, title: String) -> Control:
 	if content.size_flags_vertical == 0:
 		content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.add_child(content)
+	_TouchScrollHelper.configure_subtree(scroll)
 
 	# Bottom thumb-zone close button (>= 48px)
 	var close_btn := Button.new()

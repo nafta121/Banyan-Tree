@@ -2,6 +2,8 @@ extends Node
 
 signal theme_updated()
 
+const _TouchScrollHelper := preload("res://godot/scripts/ui/touch_scroll_helper.gd")
+
 const DEFAULT_THEME_ID := "midnight_slate"
 const LIGHT_THEME_ID := "editorial_paper"
 const MIN_TEXT_SCALE := 0.85
@@ -54,6 +56,15 @@ func _ready() -> void:
 				init_theme_id = s.theme_id
 			init_scale = s.text_scale
 	apply_theme(init_theme_id, init_scale)
+	if get_tree() != null:
+		if not get_tree().node_added.is_connected(_on_tree_node_added):
+			get_tree().node_added.connect(_on_tree_node_added)
+		if get_tree().root != null:
+			_TouchScrollHelper.configure_subtree(get_tree().root)
+
+
+func _on_tree_node_added(node: Node) -> void:
+	_TouchScrollHelper.configure_node(node)
 
 
 func is_dark() -> bool:
@@ -219,5 +230,42 @@ func _build_theme() -> Theme:
 	sep_sb.color = c_border
 	sep_sb.thickness = 1
 	t.set_stylebox("separator", "HSeparator", sep_sb)
+
+	# Mobile VScrollBar & HScrollBar indicators (slim 6px high-contrast thumb pill)
+	var v_scroll_bg := StyleBoxFlat.new()
+	v_scroll_bg.bg_color = c_border.lerp(c_bg, 0.55)
+	v_scroll_bg.set_corner_radius_all(3)
+	v_scroll_bg.content_margin_left = 3.0
+	v_scroll_bg.content_margin_right = 3.0
+	v_scroll_bg.content_margin_top = 2.0
+	v_scroll_bg.content_margin_bottom = 2.0
+
+	var h_scroll_bg := StyleBoxFlat.new()
+	h_scroll_bg.bg_color = c_border.lerp(c_bg, 0.55)
+	h_scroll_bg.set_corner_radius_all(3)
+	h_scroll_bg.content_margin_left = 2.0
+	h_scroll_bg.content_margin_right = 2.0
+	h_scroll_bg.content_margin_top = 3.0
+	h_scroll_bg.content_margin_bottom = 3.0
+
+	var grabber_idle := StyleBoxFlat.new()
+	grabber_idle.bg_color = c_muted.lerp(c_accent, 0.35)
+	grabber_idle.set_corner_radius_all(3)
+
+	var grabber_active := StyleBoxFlat.new()
+	grabber_active.bg_color = c_accent
+	grabber_active.set_corner_radius_all(3)
+
+	t.set_stylebox("scroll", "VScrollBar", v_scroll_bg)
+	t.set_stylebox("scroll_focus", "VScrollBar", v_scroll_bg)
+	t.set_stylebox("grabber", "VScrollBar", grabber_idle)
+	t.set_stylebox("grabber_highlight", "VScrollBar", grabber_active)
+	t.set_stylebox("grabber_pressed", "VScrollBar", grabber_active)
+
+	t.set_stylebox("scroll", "HScrollBar", h_scroll_bg)
+	t.set_stylebox("scroll_focus", "HScrollBar", h_scroll_bg)
+	t.set_stylebox("grabber", "HScrollBar", grabber_idle)
+	t.set_stylebox("grabber_highlight", "HScrollBar", grabber_active)
+	t.set_stylebox("grabber_pressed", "HScrollBar", grabber_active)
 
 	return t

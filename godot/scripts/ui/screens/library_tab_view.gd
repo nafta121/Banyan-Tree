@@ -125,6 +125,8 @@ func set_category(cat: String) -> void:
 	var norm := cat.strip_edges()
 	_active_category = norm if CATEGORIES.has(norm) else "all"
 	_current_page = 0
+	if _entries_scroll != null:
+		_entries_scroll.scroll_vertical = 0
 	refresh_view()
 
 
@@ -133,6 +135,8 @@ func set_search_query(q: String) -> void:
 	if _search_edit != null and _search_edit.text != _search_query:
 		_search_edit.text = _search_query
 	_current_page = 0
+	if _entries_scroll != null:
+		_entries_scroll.scroll_vertical = 0
 	refresh_view()
 
 
@@ -174,6 +178,8 @@ func get_entry_rendered_body(entry_id: String) -> String:
 func _on_search_changed(new_text: String) -> void:
 	_search_query = new_text.strip_edges()
 	_current_page = 0
+	if _entries_scroll != null:
+		_entries_scroll.scroll_vertical = 0
 	refresh_view()
 
 
@@ -184,6 +190,8 @@ func _on_clear_pressed() -> void:
 func _on_prev_page() -> void:
 	if _current_page > 0:
 		_current_page -= 1
+		if _entries_scroll != null:
+			_entries_scroll.scroll_vertical = 0
 		refresh_view()
 
 
@@ -191,6 +199,8 @@ func _on_next_page() -> void:
 	var total_pages := maxi(1, int(ceil(float(_filtered_entries.size()) / float(PAGE_SIZE))))
 	if _current_page + 1 < total_pages:
 		_current_page += 1
+		if _entries_scroll != null:
+			_entries_scroll.scroll_vertical = 0
 		refresh_view()
 
 

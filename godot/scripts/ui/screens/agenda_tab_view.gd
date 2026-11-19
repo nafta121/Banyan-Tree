@@ -46,6 +46,7 @@ var _golkar_pillars_widget: PanelContainer = null
 var _btn_final_appeal: Button = null
 var _btn_horse_trading: Button = null
 var _active_horse_sheet: VBoxContainer = null
+var _last_rendered_turn: int = -1
 
 
 func _init() -> void:
@@ -219,13 +220,19 @@ func get_bottom_zone_controls() -> Array[Control]:
 
 
 func set_action_submode(mode: String) -> void:
-	if mode in ["routines", "decrees", "factions"]:
+	if mode in ["routines", "decrees", "factions"] and _action_submode != mode:
 		_action_submode = mode
+		if _action_scroll != null:
+			_action_scroll.scroll_vertical = 0
 	refresh_view()
 
 
 func set_category_filter(cat: String) -> void:
-	_category_filter = cat if ACTION_CATEGORIES.has(cat) else "all"
+	var next_cat := cat if ACTION_CATEGORIES.has(cat) else "all"
+	if _category_filter != next_cat:
+		_category_filter = next_cat
+		if _action_scroll != null:
+			_action_scroll.scroll_vertical = 0
 	refresh_view()
 
 
@@ -424,6 +431,13 @@ func refresh_view() -> void:
 
 
 func _refresh_crisis_phase(is_id: bool) -> void:
+	if CampaignManager.current_turn != _last_rendered_turn:
+		_last_rendered_turn = CampaignManager.current_turn
+		if _crisis_narrative_scroll != null:
+			_crisis_narrative_scroll.scroll_vertical = 0
+		if _crisis_options_scroll != null:
+			_crisis_options_scroll.scroll_vertical = 0
+
 	for ch in _crisis_options_vbox.get_children():
 		_crisis_options_vbox.remove_child(ch)
 		ch.queue_free()

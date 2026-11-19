@@ -21,6 +21,7 @@ func run() -> int:
 	await _test_campaign_shell_and_five_tabs_flow()
 	await _test_turn_23_mpr_election_dossier_png_and_epilogue()
 	await _test_soundtrack_autoplay_sfx_and_scoped_storage_png_fallback()
+	await _test_touch_drag_scrolling_across_screens_and_sheets()
 
 	await tree.process_frame
 	await tree.process_frame
@@ -1093,6 +1094,321 @@ func _test_soundtrack_autoplay_sfx_and_scoped_storage_png_fallback() -> void:
 	elec.queue_free()
 	await tree.process_frame
 	AudioController.stop_all()
+
+
+func _simulate_android_touch_gesture(start_pos: Vector2, delta_total: Vector2, steps: int = 8) -> void:
+	var mb_down := InputEventMouseButton.new()
+	mb_down.device = InputEvent.DEVICE_ID_EMULATION
+	mb_down.button_index = MOUSE_BUTTON_LEFT
+	mb_down.button_mask = MOUSE_BUTTON_MASK_LEFT
+	mb_down.position = start_pos
+	mb_down.global_position = start_pos
+	mb_down.pressed = true
+	tree.root.push_input(mb_down, true)
+
+	var st_down := InputEventScreenTouch.new()
+	st_down.index = 0
+	st_down.position = start_pos
+	st_down.pressed = true
+	tree.root.push_input(st_down, true)
+
+	var cur := start_pos
+	if steps > 0 and delta_total.length() > 0.0:
+		var step_vec := delta_total / float(steps)
+		for _i in range(steps):
+			cur += step_vec
+			var mm := InputEventMouseMotion.new()
+			mm.device = InputEvent.DEVICE_ID_EMULATION
+			mm.button_mask = MOUSE_BUTTON_MASK_LEFT
+			mm.position = cur
+			mm.global_position = cur
+			mm.relative = step_vec
+			tree.root.push_input(mm, true)
+
+			var sd := InputEventScreenDrag.new()
+			sd.index = 0
+			sd.position = cur
+			sd.relative = step_vec
+			tree.root.push_input(sd, true)
+
+	var mb_up := InputEventMouseButton.new()
+	mb_up.device = InputEvent.DEVICE_ID_EMULATION
+	mb_up.button_index = MOUSE_BUTTON_LEFT
+	mb_up.button_mask = 0
+	mb_up.position = cur
+	mb_up.global_position = cur
+	mb_up.pressed = false
+	tree.root.push_input(mb_up, true)
+
+	var st_up := InputEventScreenTouch.new()
+	st_up.index = 0
+	st_up.position = cur
+	st_up.pressed = false
+	tree.root.push_input(st_up, true)
+
+
+func _test_touch_drag_scrolling_across_screens_and_sheets() -> void:
+	var prev_emu_touch := Input.emulate_touch_from_mouse
+	var prev_win_size := tree.root.size
+	Input.emulate_touch_from_mouse = true
+	tree.root.size = Vector2i(412, 915)
+	LocaleService.set_locale("id")
+	ThemeManager.apply_theme("midnight_slate", 1.25)
+
+	assert_true(
+		int(ProjectSettings.get_setting("gui/common/default_scroll_deadzone")) >= 8,
+		"project.godot configures mobile scroll deadzone >= 8px"
+	)
+
+	# 1. TitleScreen BottomSheets (Changelog RichTextLabel & Library horizontal/vertical ScrollContainers)
+	var title_packed := ResourceLoader.load("res://godot/scenes/title_screen.tscn") as PackedScene
+	var title_node := title_packed.instantiate() as Control
+	title_node.set("allow_scene_change", false)
+	tree.root.add_child(title_node)
+	await tree.process_frame
+	await tree.process_frame
+
+	var title_shell := title_node.get("shell") as SafeAreaShell
+	title_node.call("open_changelog_sheet")
+	await tree.process_frame
+	await tree.process_frame
+
+	var sheet_scroll := title_shell.bottom_sheet_host.find_child("SheetScroll", true, false) as ScrollContainer
+	assert_true(sheet_scroll != null, "Changelog BottomSheet mounts SheetScroll")
+	if sheet_scroll != null:
+		var sheet_center := sheet_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(sheet_center, Vector2(0.0, -140.0), 8)
+		await tree.process_frame
+		assert_true(sheet_scroll.scroll_vertical > 0, "Touch-dragging over Changelog cards/RichTextLabel scrolls SheetScroll vertically")
+		assert_eq(title_shell.bottom_sheet_host.get_open_count(), 1, "Touch-dragging inside BottomSheet does not close ScrimButton")
+	title_shell.bottom_sheet_host.clear_all_sheets()
+	await tree.process_frame
+
+	title_node.queue_free()
+	await tree.process_frame
+
+	# 2. DifficultyScreen SSS 4-Track List (dragging over rank Button scrolls without changing rank; clean tap changes rank)
+	AchievementService.unlock("win_historical")
+	SSSController._init_default_levels()
+	var diff_packed := ResourceLoader.load("res://godot/scenes/difficulty_screen.tscn") as PackedScene
+	var diff_node := diff_packed.instantiate() as Control
+	diff_node.set("allow_scene_change", false)
+	tree.root.add_child(diff_node)
+	await tree.process_frame
+	diff_node.call("open_sss_board")
+	await tree.process_frame
+	await tree.process_frame
+
+	var track_scroll := diff_node.get("_track_list_scroll") as ScrollContainer
+	var track_pc_card := diff_node.find_child("TrackCard_pc", true, false) as PanelContainer
+	assert_true(track_scroll != null and track_pc_card != null, "SSS 4-Track list mounts TrackListScroll and TrackCard_pc")
+	if track_scroll != null and track_pc_card != null:
+		var pc_btns := track_pc_card.find_children("*", "Button", true, false)
+		var btn_off := pc_btns[0] as Button # OFF = rank 0 (current default is 10)
+		var btn_pos := btn_off.get_global_rect().get_center()
+		_simulate_android_touch_gesture(btn_pos, Vector2(0.0, -150.0), 8)
+		await tree.process_frame
+		assert_true(track_scroll.scroll_vertical > 0, "Touch-dragging starting on SSS rank Button scrolls TrackListScroll")
+		assert_eq(int(SSSController.levels.get("pc", -1)), 10, "Touch-dragging over SSS rank Button does not accidentally click OFF")
+
+		track_scroll.scroll_vertical = 0
+		await tree.process_frame
+		btn_pos = btn_off.get_global_rect().get_center()
+		_simulate_android_touch_gesture(btn_pos, Vector2(0.0, -2.0), 1)
+		await tree.process_frame
+		assert_eq(int(SSSController.levels.get("pc", -1)), 0, "Clean 2px-jitter thumb tap on SSS rank Button applies OFF (0)")
+
+	diff_node.queue_free()
+	await tree.process_frame
+
+	# 3. CampaignShellScreen: Agenda (Crisis + Action + Nested Horizontal Pills), Stat, MPR, Library, & More tabs
+	SSSController._init_default_levels()
+	CampaignManager.rng.seed = 19980521
+	OppositionManager.rng.seed = 19980521
+	CampaignManager.start_new_campaign("easy", true)
+
+	var camp_packed := ResourceLoader.load("res://godot/scenes/campaign_shell_screen.tscn") as PackedScene
+	var camp := camp_packed.instantiate() as Control
+	camp.set("allow_scene_change", false)
+	tree.root.add_child(camp)
+	await tree.process_frame
+	await tree.process_frame
+
+	var agenda_tab := camp.call("get_tab_view", 0) as Control
+	var nar_scroll := agenda_tab.get("_crisis_narrative_scroll") as ScrollContainer
+	var opt_scroll := agenda_tab.get("_crisis_options_scroll") as ScrollContainer
+	assert_true(nar_scroll != null and opt_scroll != null, "AgendaTabView exposes crisis narrative and options ScrollContainers")
+
+	var desc_rtl := agenda_tab.get("_crisis_desc_rtl") as RichTextLabel
+	if nar_scroll != null and desc_rtl != null:
+		var desc_rect := desc_rtl.get_global_rect().intersection(nar_scroll.get_global_rect())
+		var nar_pos := desc_rect.get_center() if desc_rect.size.y > 4.0 else nar_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(nar_pos, Vector2(0.0, -110.0), 8)
+		await tree.process_frame
+		assert_true(nar_scroll.scroll_vertical > 0, "Touch-dragging directly over Crisis RichTextLabel scrolls _crisis_narrative_scroll")
+
+	var first_opt_btn := opt_scroll.find_child("CrisisOptBtn_*", true, false) as Button
+	assert_true(first_opt_btn != null, "Found first CrisisOptBtn inside _crisis_options_scroll")
+	if opt_scroll != null and first_opt_btn != null:
+		var opt_pos := first_opt_btn.get_global_rect().get_center()
+		_simulate_android_touch_gesture(opt_pos, Vector2(0.0, -110.0), 8)
+		await tree.process_frame
+		assert_true(opt_scroll.scroll_vertical > 0, "Touch-dragging starting on CrisisOptBtn scrolls _crisis_options_scroll")
+		assert_false(CampaignManager.is_action_phase, "Touch-dragging over CrisisOptBtn does NOT accidentally choose crisis option")
+
+		opt_scroll.scroll_vertical = 0
+		await tree.process_frame
+		opt_pos = first_opt_btn.get_global_rect().get_center()
+		_simulate_android_touch_gesture(opt_pos, Vector2(0.0, -2.0), 1)
+		await tree.process_frame
+		assert_true(CampaignManager.is_action_phase, "Clean 2px-jitter tap on CrisisOptBtn resolves crisis option into Action Phase")
+
+	if not CampaignManager.is_action_phase:
+		agenda_tab.call("select_crisis_option", 0)
+		await tree.process_frame
+
+	var camp_shell := camp.get("shell") as SafeAreaShell
+	camp_shell.bottom_sheet_host.clear_all_sheets()
+	await tree.process_frame
+
+	# Action Phase: vertical scroll over Routine cards & visible ExecRoutine button + horizontal scroll over Category Filter pills
+	var act_scroll := agenda_tab.get("_action_scroll") as ScrollContainer
+	var cat_bar := agenda_tab.get("_category_filter_scroll") as ScrollContainer
+	var routine_btn := act_scroll.find_child("ExecRoutine_*", true, false) as Button
+	assert_true(routine_btn != null, "Found ExecRoutine button in ActionCardsScroll")
+	if act_scroll != null and routine_btn != null:
+		var card_center := act_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(card_center, Vector2(0.0, -180.0), 8)
+		await tree.process_frame
+		assert_true(act_scroll.scroll_vertical > 0, "Touch-dragging over tall Routine PanelContainer card scrolls _action_scroll")
+
+		# Bring ExecRoutine button into the middle of _action_scroll's visible viewport, then swipe directly over the button
+		var target_scroll := maxi(0, int(routine_btn.global_position.y - act_scroll.global_position.y + float(act_scroll.scroll_vertical) - 220.0))
+		act_scroll.scroll_vertical = target_scroll
+		await tree.process_frame
+		var scroll_before_btn_drag := act_scroll.scroll_vertical
+		var btn_vis_rect := routine_btn.get_global_rect().intersection(act_scroll.get_global_rect())
+		var r_pos := btn_vis_rect.get_center()
+		_simulate_android_touch_gesture(r_pos, Vector2(0.0, -140.0), 8)
+		await tree.process_frame
+		assert_true(act_scroll.scroll_vertical > scroll_before_btn_drag, "Touch-dragging starting on visible ExecRoutine Button scrolls _action_scroll")
+		assert_false(CampaignManager.turn_executive_used, "Touch-dragging over ExecRoutine Button does not execute routine")
+
+	var cat_pill := cat_bar.find_child("CatFilterPill_Politics", true, false) as Button if cat_bar != null else null
+	assert_true(cat_pill != null, "Found CatFilterPill_Politics in ActionCategoryFilterBar")
+	if cat_bar != null and cat_pill != null:
+		var cp_pos := cat_pill.get_global_rect().get_center()
+		_simulate_android_touch_gesture(cp_pos, Vector2(-120.0, 0.0), 8)
+		await tree.process_frame
+		assert_true(cat_bar.scroll_horizontal > 0, "Horizontal swipe over CatFilterPill scrolls ActionCategoryFilterBar")
+		assert_eq(String(agenda_tab.get("_category_filter")), "all", "Horizontal swipe over CatFilterPill does not accidentally switch filter")
+
+	# Factions submode: nested horizontal fac_scroll inside vertical _action_scroll
+	agenda_tab.call("set_action_submode", "factions")
+	await tree.process_frame
+	await tree.process_frame
+	var fac_pill := act_scroll.find_child("SelectFaction_*", true, false) as Button
+	assert_true(fac_pill != null, "Found SelectFaction pill in factions submode")
+	if act_scroll != null and fac_pill != null:
+		act_scroll.scroll_vertical = 0
+		var fp_pos := fac_pill.get_global_rect().get_center()
+		_simulate_android_touch_gesture(fp_pos, Vector2(0.0, -140.0), 8)
+		await tree.process_frame
+		assert_true(act_scroll.scroll_vertical > 0, "Vertical swipe starting on nested Faction pill scrolls outer _action_scroll")
+
+	# Tab 1: StatDashboardTabView (dragging directly over StatCardWidget)
+	camp.call("switch_tab", 1)
+	await tree.process_frame
+	await tree.process_frame
+	var stat_tab := camp.call("get_tab_view", 1) as ScrollContainer
+	var stat_card := stat_tab.find_child("StatCard_econ", true, false) as Control
+	if stat_tab != null and stat_card != null:
+		var sc_pos := stat_card.get_global_rect().get_center()
+		_simulate_android_touch_gesture(sc_pos, Vector2(0.0, -160.0), 8)
+		await tree.process_frame
+		assert_true(stat_tab.scroll_vertical > 0, "Touch-dragging directly over StatCardWidget scrolls StatDashboardTabView")
+
+	# Tab 2: MPRParliamentTabView (dragging directly over caucus cards & Negotiate buttons)
+	camp.call("switch_tab", 2)
+	await tree.process_frame
+	await tree.process_frame
+	var mpr_tab := camp.call("get_tab_view", 2) as ScrollContainer
+	if mpr_tab != null:
+		var mpr_pos := mpr_tab.get_global_rect().get_center()
+		_simulate_android_touch_gesture(mpr_pos, Vector2(0.0, -160.0), 8)
+		await tree.process_frame
+		assert_true(mpr_tab.scroll_vertical > 0, "Touch-dragging over caucus cards scrolls MPRParliamentTabView")
+		assert_eq(int(camp.call("get_active_tab_index")), 2, "Dragging over Negotiate button does not accidentally jump tabs")
+
+	# Tab 3: LibraryTabView (dragging over EntryBody RichTextLabel & horizontal category bar)
+	camp.call("switch_tab", 3)
+	await tree.process_frame
+	await tree.process_frame
+	var lib_tab := camp.call("get_tab_view", 3) as Control
+	var lib_scroll := lib_tab.get("_entries_scroll") as ScrollContainer
+	var lib_cat_scroll := lib_tab.get("_cat_scroll") as ScrollContainer
+	if lib_scroll != null:
+		var lib_pos := lib_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(lib_pos, Vector2(0.0, -180.0), 8)
+		await tree.process_frame
+		assert_true(lib_scroll.scroll_vertical > 0, "Touch-dragging over Library RichTextLabel cards scrolls LibraryEntriesScroll")
+	if lib_cat_scroll != null:
+		var lcat_pos := lib_cat_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(lcat_pos, Vector2(-140.0, 0.0), 8)
+		await tree.process_frame
+		assert_true(lib_cat_scroll.scroll_horizontal > 0, "Horizontal swipe over Library category pills scrolls LibraryCategoryBar")
+
+	# Tab 4: MoreDrawerTabView (dragging directly over MusicGenreOption OptionButton & CheckBox)
+	camp.call("switch_tab", 4)
+	await tree.process_frame
+	await tree.process_frame
+	var more_tab := camp.call("get_tab_view", 4) as ScrollContainer
+	var genre_opt := more_tab.find_child("MusicGenreOption", true, false) as OptionButton
+	if more_tab != null and genre_opt != null:
+		more_tab.scroll_vertical = 0
+		var go_pos := genre_opt.get_global_rect().get_center()
+		_simulate_android_touch_gesture(go_pos, Vector2(0.0, -160.0), 8)
+		await tree.process_frame
+		assert_true(more_tab.scroll_vertical > 0, "Touch-dragging starting on MusicGenreOption scrolls MoreDrawerTabView")
+		assert_false(genre_opt.get_popup().visible, "Touch-dragging over MusicGenreOption does not pop open genre menu")
+		genre_opt.get_popup().hide()
+
+	camp.queue_free()
+	await tree.process_frame
+
+	# 4. ElectionAndEpilogueScreen (_post_scroll over TAP MPR & _epilogue_scroll over Epilogue RichTextLabel)
+	var elec_packed := ResourceLoader.load("res://godot/scenes/election_and_epilogue_screen.tscn") as PackedScene
+	var elec := elec_packed.instantiate() as Control
+	elec.set("allow_scene_change", false)
+	tree.root.add_child(elec)
+	await tree.process_frame
+	elec.call("skip_roll_call")
+	await tree.process_frame
+	await tree.process_frame
+
+	var post_scroll := elec.get("_post_scroll") as ScrollContainer
+	if post_scroll != null:
+		var ps_pos := post_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(ps_pos, Vector2(0.0, -160.0), 8)
+		await tree.process_frame
+		assert_true(post_scroll.scroll_vertical > 0, "Touch-dragging over Verdict/TAP MPR RichTextLabel scrolls _post_scroll")
+
+	elec.call("open_epilogue_view")
+	await tree.process_frame
+	await tree.process_frame
+	var epi_scroll := elec.get("_epilogue_scroll") as ScrollContainer
+	if epi_scroll != null:
+		var ep_pos := epi_scroll.get_global_rect().get_center()
+		_simulate_android_touch_gesture(ep_pos, Vector2(0.0, -160.0), 8)
+		await tree.process_frame
+		assert_true(epi_scroll.scroll_vertical > 0, "Touch-dragging over Epilogue RichTextLabel scrolls _epilogue_scroll")
+
+	elec.queue_free()
+	await tree.process_frame
+
+	ThemeManager.apply_theme("midnight_slate", 1.0)
+	tree.root.size = prev_win_size
+	Input.emulate_touch_from_mouse = prev_emu_touch
 
 
 

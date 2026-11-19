@@ -25,33 +25,39 @@ var _ceil_marker: ColorRect = null
 
 func _init() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mouse_filter = Control.MOUSE_FILTER_PASS
 
 	var root_vbox := VBoxContainer.new()
 	root_vbox.add_theme_constant_override("separation", 6)
 	root_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(root_vbox)
 
 	var top_row := HBoxContainer.new()
 	top_row.add_theme_constant_override("separation", 8)
 	top_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_row.mouse_filter = Control.MOUSE_FILTER_PASS
 	root_vbox.add_child(top_row)
 
 	_title_label = Label.new()
 	_title_label.name = "StatTitleLabel"
 	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_row.add_child(_title_label)
 
 	_lock_label = Label.new()
 	_lock_label.name = "StatLockLabel"
 	_lock_label.theme_type_variation = &"MutedLabel"
 	_lock_label.visible = false
+	_lock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_row.add_child(_lock_label)
 
 	_value_label = Label.new()
 	_value_label.name = "StatValueLabel"
 	_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_value_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_value_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root_vbox.add_child(_value_label)
 
 	# Coarse qualitative segments (shown when exact_mode == false)
@@ -59,10 +65,12 @@ func _init() -> void:
 	_segments_row.name = "QualitativeSegmentsRow"
 	_segments_row.add_theme_constant_override("separation", 4)
 	_segments_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_segments_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for i in range(SEGMENT_COUNT):
 		var seg := Panel.new()
 		seg.custom_minimum_size = Vector2(0.0, 8.0)
 		seg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		seg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_segments_row.add_child(seg)
 		_segment_rects.append(seg)
 	root_vbox.add_child(_segments_row)
@@ -73,6 +81,7 @@ func _init() -> void:
 	_exact_bar_wrap.custom_minimum_size = Vector2(0.0, 12.0)
 	_exact_bar_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_exact_bar_wrap.visible = false
+	_exact_bar_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root_vbox.add_child(_exact_bar_wrap)
 
 	_progress_bar = ProgressBar.new()
@@ -81,6 +90,7 @@ func _init() -> void:
 	_progress_bar.min_value = 0.0
 	_progress_bar.max_value = 100.0
 	_progress_bar.show_percentage = false
+	_progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_exact_bar_wrap.add_child(_progress_bar)
 
 	_floor_marker = ColorRect.new()
@@ -91,6 +101,7 @@ func _init() -> void:
 	_floor_marker.offset_right = 1.5
 	_floor_marker.color = Color.html("#E5A93C")
 	_floor_marker.visible = false
+	_floor_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_exact_bar_wrap.add_child(_floor_marker)
 
 	_ceil_marker = ColorRect.new()
@@ -101,6 +112,7 @@ func _init() -> void:
 	_ceil_marker.offset_right = 1.5
 	_ceil_marker.color = Color.html("#F87171")
 	_ceil_marker.visible = false
+	_ceil_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_exact_bar_wrap.add_child(_ceil_marker)
 
 

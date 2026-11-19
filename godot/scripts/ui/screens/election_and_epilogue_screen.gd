@@ -485,16 +485,22 @@ func _finalize_roll_call() -> void:
 
 func show_verdict_view() -> void:
 	_active_post_mode = "verdict"
+	if _post_scroll != null:
+		_post_scroll.scroll_vertical = 0
 	_sync_mode_visibility()
 
 
 func show_dossier_view() -> void:
 	_active_post_mode = "dossier"
+	if _post_scroll != null:
+		_post_scroll.scroll_vertical = 0
 	_sync_mode_visibility()
 
 
 func open_epilogue_view() -> void:
 	_active_post_mode = "epilogue"
+	if _epilogue_scroll != null:
+		_epilogue_scroll.scroll_vertical = 0
 	_sync_mode_visibility()
 
 
