@@ -1,25 +1,30 @@
-name: Build Android Portrait APK (arm64-v8a)
+name: Build & Release Android Portrait APK (arm64-v8a)
 
 on:
   push:
     branches:
       - godot4-android
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
       - godot4-android
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   GODOT_VERSION: "4.7.2"
   GODOT_TAG: "4.7.2-stable"
   ANDROID_BUILD_TOOLS: "34.0.0"
-  ANDROID_PLATFORM: "android-34"
   APK_PATH: "build/TwilightOfTheBanyanTree-Portrait-arm64.apk"
+  DEFAULT_RELEASE_TAG: "v1.0.0-godot4-android"
 
 jobs:
   build-apk:
-    name: Headless Tests & Signed arm64 APK
+    name: Headless Tests, Signed arm64 APK & GitHub Release
     runs-on: ubuntu-latest
 
     steps:
@@ -32,16 +37,21 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK & apksigner
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android build-tools and platform
+      - name: Ensure Android platform-tools & build-tools (apksigner)
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platform-tools" "build-tools;${ANDROID_BUILD_TOOLS}" "platforms;${ANDROID_PLATFORM}"
+          set -euo pipefail
+          export ANDROID_SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_DIR=${ANDROID_SDK_DIR}" >> "$GITHUB_ENV"
+          SDKM="$(ls -d "${ANDROID_SDK_DIR}"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -n 1)"
+          if [ ! -x "${ANDROID_SDK_DIR}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" ] || [ ! -x "${ANDROID_SDK_DIR}/platform-tools/adb" ]; then
+            yes | "${SDKM}" --licenses >/dev/null || true
+            "${SDKM}" --install "platform-tools" "build-tools;${ANDROID_BUILD_TOOLS}"
+          fi
+          ls -la "${ANDROID_SDK_DIR}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" "${ANDROID_SDK_DIR}/platform-tools/adb"
 
-      - name: Install Godot 4.7.2-stable & Export Templates
+      - name: Install Godot 4.7.2-stable & Android Export Templates
         run: |
+          set -euo pipefail
           mkdir -p ~/.local/bin
           mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
           curl -fSL -o /tmp/godot.zip \
@@ -56,8 +66,9 @@ jobs:
           mv /tmp/tpl_extract/templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
           rm -rf /tmp/godot.zip /tmp/templates.tpz /tmp/tpl_extract
 
-      - name: Generate Personal Debug Keystore & Configure Godot Android Export
+      - name: Generate Personal Keystore & Configure Godot EditorSettings
         run: |
+          set -euo pipefail
           mkdir -p ~/.local/share/godot/keystores
           keytool -genkeypair -v \
             -keystore ~/.local/share/godot/keystores/debug.keystore \
@@ -70,17 +81,24 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
 
           mkdir -p ~/.config/godot
-          cat <<EOF > ~/.config/godot/editor_settings-4.7.tres
-          [gd_resource type="EditorSettings" format=3]
-
-          [resource]
-          export/android/java_sdk_path = "${JAVA_HOME}"
-          export/android/android_sdk_path = "${ANDROID_HOME}"
-          export/android/debug_keystore = "${HOME}/.local/share/godot/keystores/debug.keystore"
-          export/android/debug_keystore_user = "androiddebugkey"
-          export/android/debug_keystore_pass = "android"
-          export/android/shutdown_adb_on_exit = false
-          EOF
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          cfg = Path.home() / ".config/godot/editor_settings-4.7.tres"
+          content = "\n".join([
+              '[gd_resource type="EditorSettings" format=3]',
+              '',
+              '[resource]',
+              f'export/android/java_sdk_path = "{os.environ["JAVA_HOME"]}"',
+              f'export/android/android_sdk_path = "{os.environ["ANDROID_SDK_DIR"]}"',
+              f'export/android/debug_keystore = "{Path.home()}/.local/share/godot/keystores/debug.keystore"',
+              'export/android/debug_keystore_user = "androiddebugkey"',
+              'export/android/debug_keystore_pass = "android"',
+              'export/android/shutdown_adb_on_exit = false',
+              '',
+          ])
+          cfg.write_text(content)
+          PY
 
       - name: Import Godot Resources & Global Script Classes
         run: |
@@ -98,11 +116,79 @@ jobs:
 
       - name: Verify APK Signature with apksigner
         run: |
-          "${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" verify --verbose "${APK_PATH}"
+          "${ANDROID_SDK_DIR}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" verify --verbose "${APK_PATH}"
 
-      - name: Upload Signed Android APK Artifact
+      - name: Upload Signed Android APK Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
           name: TwilightOfTheBanyanTree-Portrait-arm64
           path: ${{ env.APK_PATH }}
           if-no-files-found: error
+
+      - name: Publish Signed APK to GitHub Releases
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            REL_TAG="${GITHUB_REF#refs/tags/}"
+          else
+            REL_TAG="${DEFAULT_RELEASE_TAG}"
+          fi
+          APK_SHA256="$(sha256sum "${APK_PATH}" | awk '{print $1}')"
+          APK_SIZE="$(du -h "${APK_PATH}" | awk '{print $1}')"
+          SHORT_SHA="${GITHUB_SHA::7}"
+
+          python3 - "${APK_SIZE}" "${APK_SHA256}" "${SHORT_SHA}" <<'PY'
+          import sys
+          from pathlib import Path
+
+          apk_size, apk_sha256, short_sha = sys.argv[1], sys.argv[2], sys.argv[3]
+          notes = f"""## Twilight of the Banyan Tree — Porting Godot 4.7.2 Android (*Portrait* Satu Tangan)
+
+          Rilis koleksi pribadi **Twilight of the Banyan Tree** yang dibangun ulang secara utuh menggunakan **Godot Engine 4.7.2-stable (`gl_compatibility`)** untuk perangkat Android (`arm64-v8a`) pada cabang `godot4-android` (commit `{short_sha}`).
+
+          ### Sorotan Utama
+          - **Antarmuka *Portrait* Satu Tangan (`412×915`)**: Seluruh tombol pilihan krisis, sub-mode aksi (`Rutin`, `Dekrit`, `Fraksi`, `Akhiri Giliran`), kontrol penghitungan Sidang Umum MPR (`1x`, `2x`, `5x`, `10x`, `Lewati`), dan bilah navigasi 5 tab berada di zona jempol paruh bawah layar dengan tinggi sentuh minimum `>= 48px` serta dukungan penuh `SafeArea` & gestur *Back* Android.
+          - **Dua Tema Editorial & Aksesibilitas Baca**: Tema gelap bawaan **Midnight Slate** (`#0F1419`) dan tema terang **Editorial Paper** (`#F6F4EF`), pergantian instan **Bahasa Indonesia (`ID`) / English (`EN`)** (`2.527` kunci terjemahan), serta skala teks dinamis **`85%–140%`**.
+          - **Kabut Informasi Otentik (`Tampilkan Angka Eksak` Opsional)**: Secara bawaan menjaga ketegangan kualitatif (hanya `PC` dan jumlah kursi MPR yang tampil numerik); dapat diaktifkan kapan saja di Setelan untuk menampilkan angka `0–100`, batas lantai/atap dekrit, dan chip delta pasca-pilihan.
+          - **Penyimpanan Multi-Slot Pribadi**: Mendukung **Autosave** otomatis + **5 Slot Simpan/Muat Manual** + Ekspor/Impor cadangan JSON tanpa mendiskualifikasi ke-**59 Achievements**.
+          - **Paritas Penuh Simulasi Politik 1998–1999**:
+            - 23 giliran sejarah, 111 opsi krisis, 36 aksi rutin, 35 dekrit kepresidenan, Tiga Pilar Golkar (`A-B-G`), peleburan *Poros Tengah* (`163` kursi) pada Giliran 18, *Final Appeal*, *Horse-Trading Desk* Giliran 22, papan kustom **24 Kartu SSS** (mode Daftar 4 Jalur & Peta Node 2D), dan **112 entri Pustaka Sejarah** (termasuk esai *Criticism*).
+            - Malam Rapat Paripurna ke-12 Sidang Umum MPR (`700` kursi, kuorum ganda `>= 351` suara), naskah resmi **TAP MPR No. III/MPR/1999**, ekspor kartu PNG **Keadaan Republik (`1080px`)**, dan **Epilog** bergambar.
+            - Mencakup 36 lagu asli era Reformasi (5 filter genre + *Weighted Shuffle* kuadran politik) pada bus audio terpisah (`Music` & `SFX`), hemat baterai (`low_processor_usage_mode = true`), dan **0 izin Android berbahaya** (*100% offline*).
+
+          ### Informasi Paket APK
+          | Atribut | Nilai |
+          |---|---|
+          | **Berkas** | `TwilightOfTheBanyanTree-Portrait-arm64.apk` |
+          | **Package ID** | `id.banyantree.habibie1999` |
+          | **Arsitektur** | `arm64-v8a` (Android 64-bit) |
+          | **Minimum Android** | Android 7.0+ (`minSdkVersion 24`, `targetSdkVersion 36`) |
+          | **Ukuran** | `{apk_size}B` (mencakup seluruh 36 trek musik asli) |
+          | **SHA-256** | `{apk_sha256}` |
+
+          ### Cara Memasang di Android
+          1. Unduh berkas **`TwilightOfTheBanyanTree-Portrait-arm64.apk`** pada bagian **Assets** di bawah.
+          2. Buka berkas `.apk` di ponsel Android (`arm64-v8a`) dan izinkan pemasangan dari peramban/manajer berkas bila diminta oleh Google Play Protect (*Tetap instal* / *Install anyway*).
+
+          ---
+          *Kredit permainan & penulisan sejarah asli oleh [Meniir — Twilight of the Banyan Tree](https://github.com/Meniir/Twilight-of-the-Banyan-Tree).*
+          """
+          lines = [line[10:] if line.startswith("          ") else line for line in notes.splitlines()]
+          Path("/tmp/release_notes.md").write_text("\n".join(lines) + "\n")
+          PY
+
+          REL_TITLE="Twilight of the Banyan Tree v1.0.0 — Godot 4.7.2 Android Portrait (arm64-v8a)"
+          if gh release view "${REL_TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${REL_TAG}" -R "${GITHUB_REPOSITORY}" \
+              --title "${REL_TITLE}" \
+              --notes-file /tmp/release_notes.md
+            gh release upload "${REL_TAG}" "${APK_PATH}" -R "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${REL_TAG}" "${APK_PATH}" -R "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "${REL_TITLE}" \
+              --notes-file /tmp/release_notes.md
+          fi
